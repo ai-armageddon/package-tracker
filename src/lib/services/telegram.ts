@@ -35,7 +35,6 @@ function escapeHtml(s: string): string {
 }
 
 function isValidTrackingNumber(tn: string): boolean {
-  // USPS: 20-22 digit numeric
   return /^\d{20,22}$/.test(tn);
 }
 
@@ -93,9 +92,45 @@ async function fetchAndSaveTracking(tn: string): Promise<string> {
   }
 }
 
-async function resolveTrackingRef(
-  ref: string
-): Promise<{ item: Awaited<ReturnType<typeof prisma.trackingItem.findUnique>> } | { error: string }> {
+function levenshtein(a: string, b: string): number {
+  const m = a.length;
+  const n = b.length;
+  const dp: number[][] = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
+  for (let i = 0; i <= m; i++) dp[i][0] = i;
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i][j] =
+        a[i - 1] === b[j - 1]
+          ? dp[i - 1][j - 1]
+          : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+    }
+  }
+  return dp[m][n];
+}
+
+const KNOWN_COMMANDS = ['list', 'add', 'edit', 'status', 'remove', 'pause', 'resume', 'check', 'help', 'start', 'packages'];
+
+function suggestCommand(input: string): string | null {
+  const lower = input.toLowerCase();
+  let best: { cmd: string; dist: number } | null = null;
+
+  for (const cmd of KNOWN_COMMANDS) {
+    const dist = levenshtein(lower, cmd);
+    if (dist <= 2 && (!best || dist < best.dist)) {
+      best = { cmd, dist };
+    }
+  }
+
+  if (best && best.dist <= 2) return `/${best.cmd}`;
+  return null;
+}
+
+type ResolveResult =
+  | { item: Awaited<ReturnType<typeof prisma.trackingItem.findUnique>>; suggestion?: never }
+  | { error: string; suggestion?: string };
+
+async function resolveTrackingRef(ref: string): Promise<ResolveResult> {
   const trimmed = ref.trim();
 
   // Try as index first (1-based)
@@ -108,13 +143,50 @@ async function resolveTrackingRef(
     return { item: items[idx] };
   }
 
-  // Try as tracking number
+  // Try exact tracking number match
   const tn = trimmed.toUpperCase();
-  const item = await prisma.trackingItem.findUnique({ where: { trackingNumber: tn } });
-  if (!item) {
-    return { error: `Tracking number <code>${escapeHtml(tn)}</code> not found.` };
+  const exactItem = await prisma.trackingItem.findUnique({ where: { trackingNumber: tn } });
+  if (exactItem) return { item: exactItem };
+
+  // Exact title match
+  const titleItem = await prisma.trackingItem.findFirst({ where: { title: trimmed } });
+  if (titleItem) return { item: titleItem };
+
+  // Fuzzy: look for close tracking number or title match
+  const all = await prisma.trackingItem.findMany({
+    select: { trackingNumber: true, title: true },
+  });
+
+  let bestMatch: string | null = null;
+  let bestDist = Infinity;
+
+  for (const p of all) {
+    // Check tracking number similarity
+    const tnDist = levenshtein(tn, p.trackingNumber);
+    if (tnDist <= 3 && tnDist < bestDist) {
+      bestDist = tnDist;
+      bestMatch = p.title
+        ? `${escapeHtml(p.title)} (<code>${p.trackingNumber}</code>)`
+        : `<code>${p.trackingNumber}</code>`;
+    }
+    // Check title similarity (case-insensitive)
+    if (p.title) {
+      const titleDist = levenshtein(trimmed.toLowerCase(), p.title.toLowerCase());
+      if (titleDist <= 3 && titleDist < bestDist) {
+        bestDist = titleDist;
+        bestMatch = `${escapeHtml(p.title)} (<code>${p.trackingNumber}</code>)`;
+      }
+    }
   }
-  return { item };
+
+  if (bestMatch) {
+    return {
+      error: `Not found: <code>${escapeHtml(trimmed)}</code>`,
+      suggestion: `Did you mean ${bestMatch}?`,
+    };
+  }
+
+  return { error: `Tracking number <code>${escapeHtml(tn)}</code> not found.` };
 }
 
 function formatStatusBar(
@@ -290,7 +362,10 @@ async function handleEdit(ctx: Context, ref: string) {
 
   const resolved = await resolveTrackingRef(ref);
   if ('error' in resolved) {
-    await ctx.reply(resolved.error, { parse_mode: 'HTML' });
+    const msg = resolved.suggestion
+      ? `${resolved.error}. ${resolved.suggestion}`
+      : resolved.error;
+    await ctx.reply(msg, { parse_mode: 'HTML' });
     return;
   }
 
@@ -318,7 +393,10 @@ async function handleEditState(ctx: Context, text: string): Promise<boolean> {
   if (!session.itemId) {
     const resolved = await resolveTrackingRef(text);
     if ('error' in resolved) {
-      await ctx.reply(resolved.error, { parse_mode: 'HTML' });
+      const msg = resolved.suggestion
+        ? `${resolved.error}. ${resolved.suggestion}`
+        : resolved.error;
+      await ctx.reply(msg, { parse_mode: 'HTML' });
       return true;
     }
     const item = resolved.item!;
@@ -365,7 +443,10 @@ async function handleEditState(ctx: Context, text: string): Promise<boolean> {
 async function handleRemove(ctx: Context, ref: string) {
   const resolved = await resolveTrackingRef(ref);
   if ('error' in resolved) {
-    await ctx.reply(resolved.error, { parse_mode: 'HTML' });
+    const msg = resolved.suggestion
+      ? `${resolved.error}. ${resolved.suggestion}`
+      : resolved.error;
+    await ctx.reply(msg, { parse_mode: 'HTML' });
     return;
   }
 
@@ -378,7 +459,10 @@ async function handleRemove(ctx: Context, ref: string) {
 async function handleStatus(ctx: Context, ref: string) {
   const resolved = await resolveTrackingRef(ref);
   if ('error' in resolved) {
-    await ctx.reply(resolved.error, { parse_mode: 'HTML' });
+    const msg = resolved.suggestion
+      ? `${resolved.error}. ${resolved.suggestion}`
+      : resolved.error;
+    await ctx.reply(msg, { parse_mode: 'HTML' });
     return;
   }
 
@@ -421,7 +505,10 @@ async function handleStatus(ctx: Context, ref: string) {
 async function handlePause(ctx: Context, ref: string, pause: boolean) {
   const resolved = await resolveTrackingRef(ref);
   if ('error' in resolved) {
-    await ctx.reply(resolved.error, { parse_mode: 'HTML' });
+    const msg = resolved.suggestion
+      ? `${resolved.error}. ${resolved.suggestion}`
+      : resolved.error;
+    await ctx.reply(msg, { parse_mode: 'HTML' });
     return;
   }
 
@@ -553,6 +640,12 @@ export function startBot() {
     if (text.startsWith('/')) {
       addSessions.delete(String(ctx.chat!.id));
       editSessions.delete(String(ctx.chat!.id));
+
+      const cmdName = text.split(/\s+/)[0].replace(/^\/+/, '').split('@')[0].toLowerCase();
+      const suggestion = suggestCommand(cmdName);
+      if (suggestion) {
+        await ctx.reply(`Unknown command. Did you mean <b>${suggestion}</b>?`, { parse_mode: 'HTML' });
+      }
       return;
     }
 
