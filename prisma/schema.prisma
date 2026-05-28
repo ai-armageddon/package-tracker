@@ -1,0 +1,39 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model TrackingItem {
+  id             String          @id @default(cuid())
+  trackingNumber String
+  title          String?
+  note           String?
+  lastStatus     String?
+  lastStatusDate DateTime?
+  lastDetail     String?
+  lastLocation   String?
+  active         Boolean         @default(true)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  statusHistory  StatusHistory[]
+
+  @@unique([trackingNumber])
+}
+
+model StatusHistory {
+  id              String       @id @default(cuid())
+  trackingItemId  String
+  trackingItem    TrackingItem @relation(fields: [trackingItemId], references: [id], onDelete: Cascade)
+  status          String
+  detail          String
+  location        String?
+  eventDate       String
+  eventTime       String
+  createdAt       DateTime     @default(now())
+
+  @@index([trackingItemId])
+}
