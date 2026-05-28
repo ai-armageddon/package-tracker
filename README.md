@@ -16,7 +16,7 @@ Track USPS packages via Shippo and get status notifications through Telegram.
 
 - Node.js 22+
 - PostgreSQL
-- [Shippo](https://apps.goshippo.com/) account (free test key works for dev)
+- [17TRACK](https://www.17track.net/en) account (free API key)
 - [Telegram Bot Token](https://t.me/botfather)
 
 ### Setup
@@ -69,14 +69,14 @@ Tip: use numbers from `/list`, e.g. `/status 1`
 | `DATABASE_URL` | PostgreSQL connection string |
 | `TELEGRAM_BOT_TOKEN` | Telegram bot token from BotFather |
 | `TELEGRAM_CHAT_ID` | Your Telegram chat ID |
-| `SHIPPO_API_KEY` | Shippo API key (test or live) |
+| `TRACK17_API_KEY` | 17TRACK API key (free at 17track.net) |
 | `CHECK_INTERVAL_MINUTES` | Status check interval (default: 15) |
 
 ## Tech Stack
 
 - Next.js 14 + TypeScript + Tailwind CSS
 - Prisma + PostgreSQL
-- Shippo Tracking API
+- 17TRACK Tracking API
 - Telegraf (Telegram Bot)
 
 ## OpenClaw Integration (AI Chat)

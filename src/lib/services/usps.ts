@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const USPS_TRACK_URL = 'https://tools.usps.com/tools/app/resources/track/api/tracking-package-detail';
+const TRACK17_URL = 'https://api.17track.net/track/v2.2/gettrackinfo';
 
 export interface TrackingEvent {
   status: string;
@@ -16,8 +16,15 @@ export interface TrackingResult {
   events: TrackingEvent[];
 }
 
+function getKey(): string {
+  const key = process.env.TRACK17_API_KEY;
+  if (!key) throw new Error('TRACK17_API_KEY not configured');
+  return key;
+}
+
 function formatLocation(ev: any): string {
-  const parts = [ev.eventCity, ev.eventState, ev.eventZIPCode].filter(Boolean);
+  const t = ev.trackingLocation || ev.destinationInfo?.trackingLocation || {};
+  const parts = [t.city, t.state, t.zip].filter(Boolean);
   return parts.join(', ');
 }
 
@@ -26,34 +33,56 @@ export async function checkTracking(
 ): Promise<TrackingResult[]> {
   const results: TrackingResult[] = [];
 
-  for (const tn of trackingNumbers) {
+  // 17track accepts up to 40 tracking numbers per request
+  const chunks: string[][] = [];
+  for (let i = 0; i < trackingNumbers.length; i += 40) {
+    chunks.push(trackingNumbers.slice(i, i + 40));
+  }
+
+  for (const chunk of chunks) {
     try {
-      const { data } = await axios.get(USPS_TRACK_URL, {
-        params: { trackingNumber: tn },
-        headers: {
-          'User-Agent': 'Mozilla/5.0',
-          Accept: 'application/json',
-        },
-        timeout: 15000,
-      });
+      const { data } = await axios.post(
+        TRACK17_URL,
+        chunk.map((n) => ({ number: n })),
+        {
+          headers: {
+            '17token': getKey(),
+            'Content-Type': 'application/json',
+          },
+          timeout: 20000,
+        }
+      );
 
-      const rawEvents = data.trackingEvents || [];
-      const events: TrackingEvent[] = rawEvents.map((ev: any) => ({
-        status: ev.eventType || ev.event || '',
-        detail: ev.eventType || ev.event || '',
-        location: formatLocation(ev),
-        date: ev.eventDate || '',
-        time: ev.eventTime || '',
-      }));
+      if (data.code !== 0) {
+        console.error('17TRACK error:', data);
+        for (const tn of chunk) results.push({ trackingNumber: tn, summary: '', events: [] });
+        continue;
+      }
 
-      const status = data.trackingStatus || data.trackingInfo?.trackingStatus || 'Unknown';
+      const accepted = data.data?.accepted || [];
+      for (let i = 0; i < accepted.length; i++) {
+        const entry = accepted[i];
+        const tn = entry.number || chunk[i] || '';
+        const info = entry.track_info || entry.track;
+        if (!info) {
+          results.push({ trackingNumber: tn, summary: '', events: [] });
+          continue;
+        }
 
-      results.push({ trackingNumber: tn, summary: status, events });
+        const events: TrackingEvent[] = (info.tracking || []).map((ev: any) => ({
+          status: ev.status || '',
+          detail: ev.status || '',
+          location: formatLocation(ev),
+          date: ev.date || '',
+          time: ev.time || '',
+        }));
 
-      await new Promise((r) => setTimeout(r, 300));
+        const summary = info.latest_status?.status || info.summary || 'Unknown';
+        results.push({ trackingNumber: tn, summary, events });
+      }
     } catch (err: any) {
-      console.error(`USPS error for ${tn}:`, err?.response?.status || err.message);
-      results.push({ trackingNumber: tn, summary: '', events: [] });
+      console.error('17TRACK error:', err?.response?.data || err.message);
+      for (const tn of chunk) results.push({ trackingNumber: tn, summary: '', events: [] });
     }
   }
 

@@ -18,7 +18,7 @@ export default function RootLayout({
           <div className="max-w-4xl mx-auto px-4 py-4 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <img
-                src="https://upload.wikimedia.org/wikipedia/commons/thumb/d/d1/United_States_Postal_Service_Logo.svg/512px-United_States_Postal_Service_Logo.svg.png"
+                src="https://www.usps.com/global-elements/header/images/utility-header/logo-sb.svg"
                 alt="USPS"
                 className="h-8 w-auto"
               />
