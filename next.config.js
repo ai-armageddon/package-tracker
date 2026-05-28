@@ -2,7 +2,7 @@
 const nextConfig = {
   experimental: {
     instrumentationHook: true,
-    serverComponentsExternalPackages: ['@prisma/client', '@anthropic-ai/sdk'],
+    serverComponentsExternalPackages: ['@prisma/client'],
   },
 };
 

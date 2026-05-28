@@ -2,7 +2,6 @@ import { Telegraf, Context } from 'telegraf';
 import { message } from 'telegraf/filters';
 import { prisma } from '@/lib/db/prisma';
 import { checkTracking } from '@/lib/services/usps';
-import Anthropic from '@anthropic-ai/sdk';
 
 let bot: Telegraf | null = null;
 let chatId: string | null = null;
@@ -40,13 +39,50 @@ function isValidTrackingNumber(tn: string): boolean {
   return /^\d{20,22}$/.test(tn);
 }
 
-async function fetchTrackingSummary(tn: string): Promise<string> {
+async function fetchAndSaveTracking(tn: string): Promise<string> {
   try {
     const results = await checkTracking([tn]);
     const r = results[0];
     if (!r || !r.events.length) return '';
 
     const latest = r.events[0];
+
+    const item = await prisma.trackingItem.findUnique({ where: { trackingNumber: tn } });
+    if (item) {
+      await prisma.trackingItem.update({
+        where: { id: item.id },
+        data: {
+          lastStatus: latest.status,
+          lastDetail: latest.detail,
+          lastLocation: latest.location || null,
+          lastStatusDate: latest.date ? new Date(latest.date) : null,
+        },
+      });
+
+      for (const event of r.events) {
+        const exists = await prisma.statusHistory.findFirst({
+          where: {
+            trackingItemId: item.id,
+            eventDate: event.date,
+            eventTime: event.time,
+            status: event.status,
+          },
+        });
+        if (!exists) {
+          await prisma.statusHistory.create({
+            data: {
+              trackingItemId: item.id,
+              status: event.status,
+              detail: event.detail,
+              location: event.location || null,
+              eventDate: event.date,
+              eventTime: event.time,
+            },
+          });
+        }
+      }
+    }
+
     const parts: string[] = [];
     parts.push(`📬 <b>${escapeHtml(latest.status)}</b>`);
     if (latest.detail) parts.push(`📋 ${escapeHtml(latest.detail)}`);
@@ -166,7 +202,7 @@ async function handleAdd(ctx: Context, args: string) {
     await prisma.trackingItem.create({
       data: { trackingNumber, title: maybeTitle, note: null },
     });
-    const summary = await fetchTrackingSummary(trackingNumber);
+    const summary = await fetchAndSaveTracking(trackingNumber);
     await ctx.reply(
       `✅ Added: <b>${escapeHtml(maybeTitle)}</b>\n🔢 <code>${trackingNumber}</code>${summary ? '\n\n' + summary : ''}`,
       { parse_mode: 'HTML' }
@@ -198,7 +234,7 @@ async function handleAddState(ctx: Context, text: string): Promise<boolean> {
       await prisma.trackingItem.create({
         data: { trackingNumber: session.trackingNumber, title: null, note: null },
       });
-      const summary = await fetchTrackingSummary(session.trackingNumber);
+      const summary = await fetchAndSaveTracking(session.trackingNumber);
       await ctx.reply(
         `✅ Added: <code>${session.trackingNumber}</code>${summary ? '\n\n' + summary : ''}`,
         { parse_mode: 'HTML' }
@@ -216,7 +252,7 @@ async function handleAddState(ctx: Context, text: string): Promise<boolean> {
       data: { trackingNumber: session.trackingNumber, title, note: null },
     });
     const label = title || session.trackingNumber;
-    const summary = await fetchTrackingSummary(session.trackingNumber);
+    const summary = await fetchAndSaveTracking(session.trackingNumber);
     await ctx.reply(
       `✅ Added: <b>${escapeHtml(label)}</b>\n🔢 <code>${session.trackingNumber}</code>${summary ? '\n\n' + summary : ''}`,
       { parse_mode: 'HTML' }
@@ -396,69 +432,6 @@ async function handlePause(ctx: Context, ref: string, pause: boolean) {
   await ctx.reply(`⏸️ <b>${escapeHtml(label)}</b> ${action}.`, { parse_mode: 'HTML' });
 }
 
-async function handleChat(ctx: Context, userMessage: string) {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    await ctx.reply(
-      'Claude is not configured. Use commands:\n/list • /add • /remove • /status • /edit • /check',
-    );
-    return;
-  }
-
-  const items = await prisma.trackingItem.findMany({
-    orderBy: { createdAt: 'desc' },
-    include: { statusHistory: { orderBy: [{ eventDate: 'desc' }, { eventTime: 'desc' }], take: 5 } },
-  });
-
-  const packageData = items.map((item, i) => ({
-    index: i + 1,
-    trackingNumber: item.trackingNumber,
-    title: item.title || '(no title)',
-    active: item.active,
-    lastStatus: item.lastStatus || 'No status yet',
-    lastDetail: item.lastDetail || '',
-    lastLocation: item.lastLocation || '',
-    lastStatusDate: item.lastStatusDate?.toISOString() || '',
-    recentHistory: item.statusHistory.map((h) => ({
-      status: h.status,
-      detail: h.detail,
-      location: h.location,
-      date: h.eventDate,
-      time: h.eventTime,
-    })),
-  }));
-
-  try {
-    const anthropic = new Anthropic({ apiKey });
-    const msg = await anthropic.messages.create({
-      model: 'claude-3-5-haiku-latest',
-      max_tokens: 500,
-      temperature: 0.3,
-      system: `You are a USPS tracking assistant. You help the user understand their package shipments.
-The user's packages are listed below as JSON. Each package has an "index" number (1-based).
-Answer concisely in plain text (no markdown).
-If the user asks about a specific package, look it up by index number, title, or tracking number.
-If they ask to list packages, summarize them.
-If they ask something unrelated to packages, let them know you only help with package tracking.
-Always include the index number and tracking number when referencing a package.
-
-Current package data:
-${JSON.stringify(packageData, null, 2)}`,
-      messages: [{ role: 'user', content: userMessage }],
-    });
-
-    const text = msg.content
-      .filter((b): b is Anthropic.TextBlock => b.type === 'text')
-      .map((b) => b.text)
-      .join('\n');
-
-    await ctx.reply(text || 'Sorry, I could not process that.');
-  } catch (err: any) {
-    console.error('Anthropic error:', err);
-    await ctx.reply('Sorry, there was an error processing your request. Try using commands instead.');
-  }
-}
-
 async function handleCheckNow(ctx: Context) {
   await ctx.reply('🔍 Checking all packages now...');
   try {
@@ -586,7 +559,9 @@ export function startBot() {
     if (await handleAddState(ctx, text)) return;
     if (await handleEditState(ctx, text)) return;
 
-    await handleChat(ctx, text);
+    await ctx.reply(
+      'Use commands:\n/list • /add • /edit • /status • /remove • /pause • /resume • /check',
+    );
   });
 
   bot.catch((err: any) => {

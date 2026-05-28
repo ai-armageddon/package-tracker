@@ -78,3 +78,21 @@ Tip: use numbers from `/list`, e.g. `/status 1`
 - Prisma + PostgreSQL
 - Shippo Tracking API
 - Telegraf (Telegram Bot)
+
+## OpenClaw Integration (AI Chat)
+
+This project includes an [OpenClaw](https://openclaw.ai) skill for natural language chat about your packages via your existing OpenClaw Telegram bot.
+
+### Install the skill
+
+```bash
+# Copy the skill into OpenClaw's managed skills directory
+cp -r openclaw-skill ~/.openclaw/skills/usps-tracking
+
+# Or install as a workspace skill
+openclaw skills install ./openclaw-skill --as usps-tracking
+```
+
+Then restart OpenClaw or start a new session. Your OpenClaw bot will now be able to answer questions like "has my eBay package shipped?" by querying the local tracking API.
+
+The skill is strictly scoped — it will only answer questions about your USPS packages and decline anything else.
