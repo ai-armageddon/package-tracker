@@ -4,6 +4,7 @@ import './globals.css';
 export const metadata: Metadata = {
   title: 'USPS Tracking Notifier',
   description: 'Track USPS packages and get Telegram notifications',
+  icons: { icon: 'https://www.usps.com/favicon.ico' },
 };
 
 export default function RootLayout({
