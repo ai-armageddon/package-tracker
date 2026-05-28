@@ -3,7 +3,7 @@ import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 
 puppeteer.use(StealthPlugin());
 
-const TRACK_URL = 'https://tools.usps.com/go/TrackConfirmAction';
+const TRACK_URL = 'https://tools.usps.com/tracking';
 
 export interface TrackingEvent {
   status: string;
@@ -23,84 +23,83 @@ async function scrapePage(
   page: import('puppeteer').Page,
   trackingNumber: string
 ): Promise<TrackingResult> {
-  await page.goto(`${TRACK_URL}?tLabels=${encodeURIComponent(trackingNumber)}`, {
+  await page.goto(`${TRACK_URL}/${encodeURIComponent(trackingNumber)}`, {
     waitUntil: 'networkidle2',
     timeout: 30000,
   });
 
-  // Wait for tracking data to render
-  try {
-    await page.waitForFunction(
-      () => {
-        const el = document.querySelector('.tracking-number, .tracking-status, [class*="tracking"]');
-        return !!el;
-      },
-      { timeout: 15000 }
-    );
-  } catch {
-    // Page might have loaded but with no tracking events yet
-  }
+  await new Promise((r) => setTimeout(r, 3000));
 
-  // Extract tracking events from the page
   const data = await page.evaluate(() => {
+    const body = document.body.innerText;
+
+    // Extract description (e.g. "Your item arrived at...")
+    const descMatch = body.match(
+      /(?:Status|Your item)[\s\S]*?\.(?=\s*(?:Get More|Tracking Number|USPS Tracking))/i
+    );
+    const description = descMatch ? descMatch[0].trim() : '';
+
+    // Get tracking section
+    const startIdx = body.indexOf('On the Way\n');
+    const endIdx = body.indexOf('\nWhat Do USPS Tracking Statuses Mean');
+    const section =
+      startIdx >= 0 && endIdx >= 0
+        ? body.substring(startIdx, endIdx)
+        : body;
+
+    const lines = section.split('\n').map((l) => l.trim()).filter(Boolean);
+
+    // Parse events: pattern can be:
+    //   STATUS
+    //   LOCATION (optional, all-caps)
+    //   DATE TIME
     const events: Array<{ status: string; detail: string; location: string; date: string; time: string }> = [];
-    let summary = '';
+    const dateRe = /^(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),\s+(\d{4})\s+(\d{1,2}:\d{2}\s*(?:AM|PM))$/i;
+    const capsRe = /^[A-Z][A-Z\s,.-]+$/;
 
-    // Try to find the tracking summary/status
-    const statusEl =
-      document.querySelector('.delivery_status') ||
-      document.querySelector('[class*="status"]') ||
-      document.querySelector('strong');
-    summary = statusEl?.textContent?.trim() || '';
+    const knownStatuses = new Set([
+      'Delivered', 'Out for Delivery', 'Preparing for Delivery',
+      'Arrived at USPS Facility', 'Arrived at Post Office',
+      'In Transit to Next Facility', 'Departed USPS Facility',
+      'Accepted at USPS Facility', 'USPS in possession of item',
+      'Shipping Label Created', 'Available for Pickup',
+      'On the Way',
+    ]);
 
-    // Try table-based tracking history
-    const rows = document.querySelectorAll('table tbody tr, .tracking-history tr, [class*="tracking-history"] tr');
-    rows.forEach((row) => {
-      const cells = row.querySelectorAll('td');
-      if (cells.length >= 3) {
-        const date = cells[0]?.textContent?.trim() || '';
-        const time = cells[1]?.textContent?.trim() || '';
-        const status = cells[2]?.textContent?.trim() || '';
-        const location = cells[3]?.textContent?.trim() || '';
-        if (status) {
-          events.push({ status, detail: status, location, date, time });
-        }
+    for (let i = 0; i < lines.length; i++) {
+      const dateMatch = lines[i].match(dateRe);
+      if (!dateMatch) continue;
+
+      const date = dateMatch[1] + ' ' + dateMatch[2] + ', ' + dateMatch[3];
+      const time = dateMatch[4];
+
+      let status = '';
+      let location = '';
+
+      // line before date could be status or location
+      const prev = i >= 1 ? lines[i - 1] : '';
+      const prevPrev = i >= 2 ? lines[i - 2] : '';
+
+      // prev is location (all caps), prevPrev is status
+      if (capsRe.test(prev) && knownStatuses.has(prevPrev)) {
+        status = prevPrev;
+        location = prev;
+      } else if (knownStatuses.has(prev)) {
+        status = prev;
+        location = '';
+      } else {
+        continue;
       }
-    });
 
-    // Fallback: try to find tracking data in page text
-    if (events.length === 0) {
-      const pageText = document.body?.innerText || '';
-
-      // Look for common USPS tracking patterns
-      const trackingSection = pageText.match(
-        /Tracking History[\s\S]*?(?=See Less|Track Another|$)/i
-      );
-      if (trackingSection) {
-        const lines = trackingSection[0].split('\n').filter(Boolean);
-        for (const line of lines) {
-          const match = line.match(
-            /^(\w+ \d+, \d{4})\s*,?\s*(\d{1,2}:\d{2}\s*(?:am|pm))\s+(.+)$/i
-          );
-          if (match) {
-            events.push({
-              date: match[1],
-              time: match[2],
-              status: match[3].trim(),
-              detail: match[3].trim(),
-              location: '',
-            });
-          }
-        }
-      }
+      events.push({ status, detail: status, location, date, time });
     }
 
-    return { summary, events };
+    return { description, events };
   });
 
   return {
     trackingNumber,
-    summary: data.summary || 'Unknown',
+    summary: data.description || 'Unknown',
     events: data.events,
   };
 }
@@ -121,7 +120,6 @@ export async function checkTracking(
     for (const tn of trackingNumbers) {
       const page = await browser.newPage();
       try {
-        // Set realistic viewport and user agent
         await page.setViewport({ width: 1280, height: 800 });
         const result = await scrapePage(page, tn);
         results.push(result);
@@ -131,8 +129,6 @@ export async function checkTracking(
       } finally {
         await page.close();
       }
-
-      // Be polite — small delay between pages
       await new Promise((r) => setTimeout(r, 2000));
     }
   } finally {
