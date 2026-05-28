@@ -2,7 +2,7 @@ import { Telegraf, Context } from 'telegraf';
 import { message } from 'telegraf/filters';
 import { prisma } from '@/lib/db/prisma';
 import { checkTracking } from '@/lib/services/usps';
-import OpenAI from 'openai';
+import Anthropic from '@anthropic-ai/sdk';
 
 let bot: Telegraf | null = null;
 let chatId: string | null = null;
@@ -397,10 +397,10 @@ async function handlePause(ctx: Context, ref: string, pause: boolean) {
 }
 
 async function handleChat(ctx: Context, userMessage: string) {
-  const apiKey = process.env.OPENAI_API_KEY;
+  const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     await ctx.reply(
-      'OpenAI is not configured. Use commands:\n/list • /add • /remove • /status • /check',
+      'Claude is not configured. Use commands:\n/list • /add • /remove • /status • /edit • /check',
     );
     return;
   }
@@ -429,34 +429,32 @@ async function handleChat(ctx: Context, userMessage: string) {
   }));
 
   try {
-    const openai = new OpenAI({ apiKey });
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [
-        {
-          role: 'system',
-          content: `You are a USPS tracking assistant. You help the user understand their package shipments.
+    const anthropic = new Anthropic({ apiKey });
+    const msg = await anthropic.messages.create({
+      model: 'claude-3-5-haiku-latest',
+      max_tokens: 500,
+      temperature: 0.3,
+      system: `You are a USPS tracking assistant. You help the user understand their package shipments.
 The user's packages are listed below as JSON. Each package has an "index" number (1-based).
 Answer concisely in plain text (no markdown).
 If the user asks about a specific package, look it up by index number, title, or tracking number.
 If they ask to list packages, summarize them.
 If they ask something unrelated to packages, let them know you only help with package tracking.
-Always include the index number and tracking number when referencing a package.`,
-        },
-        {
-          role: 'system',
-          content: `Current package data:\n${JSON.stringify(packageData, null, 2)}`,
-        },
-        { role: 'user', content: userMessage },
-      ],
-      max_tokens: 500,
-      temperature: 0.3,
+Always include the index number and tracking number when referencing a package.
+
+Current package data:
+${JSON.stringify(packageData, null, 2)}`,
+      messages: [{ role: 'user', content: userMessage }],
     });
 
-    const reply = completion.choices[0]?.message?.content || 'Sorry, I could not process that.';
-    await ctx.reply(reply);
+    const text = msg.content
+      .filter((b): b is Anthropic.TextBlock => b.type === 'text')
+      .map((b) => b.text)
+      .join('\n');
+
+    await ctx.reply(text || 'Sorry, I could not process that.');
   } catch (err: any) {
-    console.error('OpenAI error:', err);
+    console.error('Anthropic error:', err);
     await ctx.reply('Sorry, there was an error processing your request. Try using commands instead.');
   }
 }
