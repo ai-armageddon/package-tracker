@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const SHIPPO_API = 'https://api.goshippo.com/tracks';
+const USPS_TRACK_URL = 'https://tools.usps.com/tools/app/resources/track/api/tracking-package-detail';
 
 export interface TrackingEvent {
   status: string;
@@ -16,25 +16,9 @@ export interface TrackingResult {
   events: TrackingEvent[];
 }
 
-function getHeaders(): Record<string, string> {
-  const key = process.env.SHIPPO_API_KEY;
-  if (!key) throw new Error('SHIPPO_API_KEY not configured');
-  return { Authorization: `ShippoToken ${key}`, 'Content-Type': 'application/json' };
-}
-
-function formatLocation(loc: { city?: string; state?: string; zip?: string } | null | undefined): string {
-  if (!loc) return '';
-  const parts = [loc.city, loc.state, loc.zip].filter(Boolean);
+function formatLocation(ev: any): string {
+  const parts = [ev.eventCity, ev.eventState, ev.eventZIPCode].filter(Boolean);
   return parts.join(', ');
-}
-
-function parseTimestamp(iso: string): { date: string; time: string } {
-  if (!iso) return { date: '', time: '' };
-  const d = new Date(iso);
-  return {
-    date: d.toISOString().slice(0, 10),
-    time: d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }),
-  };
 }
 
 export async function checkTracking(
@@ -44,31 +28,31 @@ export async function checkTracking(
 
   for (const tn of trackingNumbers) {
     try {
-      const { data } = await axios.get(
-        `${SHIPPO_API}/usps/${encodeURIComponent(tn)}/`,
-        { headers: getHeaders(), timeout: 15000 }
-      );
+      const { data } = await axios.get(USPS_TRACK_URL, {
+        params: { trackingNumber: tn },
+        headers: {
+          'User-Agent': 'Mozilla/5.0',
+          Accept: 'application/json',
+        },
+        timeout: 15000,
+      });
 
-      const history: TrackingEvent[] =
-        data.tracking_history?.map((h: any) => {
-          const d = parseTimestamp(h.status_date);
-          return {
-            status: h.status || '',
-            detail: h.status_details || '',
-            location: formatLocation(h.location),
-            date: d.date,
-            time: d.time,
-          };
-        }) || [];
+      const rawEvents = data.trackingEvents || [];
+      const events: TrackingEvent[] = rawEvents.map((ev: any) => ({
+        status: ev.eventType || ev.event || '',
+        detail: ev.eventType || ev.event || '',
+        location: formatLocation(ev),
+        date: ev.eventDate || '',
+        time: ev.eventTime || '',
+      }));
 
-      const current = data.tracking_status;
-      const summary = current?.status_details || current?.status || 'Unknown';
+      const status = data.trackingStatus || data.trackingInfo?.trackingStatus || 'Unknown';
 
-      results.push({ trackingNumber: tn, summary, events: history });
+      results.push({ trackingNumber: tn, summary: status, events });
 
-      await new Promise((r) => setTimeout(r, 250));
+      await new Promise((r) => setTimeout(r, 300));
     } catch (err: any) {
-      console.error(`Shippo error for ${tn}:`, err?.response?.data || err.message);
+      console.error(`USPS error for ${tn}:`, err?.response?.status || err.message);
       results.push({ trackingNumber: tn, summary: '', events: [] });
     }
   }
