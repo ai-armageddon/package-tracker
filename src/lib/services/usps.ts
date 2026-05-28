@@ -1,6 +1,9 @@
-import axios from 'axios';
+import puppeteer from 'puppeteer-extra';
+import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 
-const TRACK17_URL = 'https://api.17track.net/track/v2.2/gettrackinfo';
+puppeteer.use(StealthPlugin());
+
+const TRACK_URL = 'https://tools.usps.com/go/TrackConfirmAction';
 
 export interface TrackingEvent {
   status: string;
@@ -16,84 +19,124 @@ export interface TrackingResult {
   events: TrackingEvent[];
 }
 
-function getKey(): string {
-  const key = process.env.TRACK17_API_KEY;
-  if (!key) throw new Error('TRACK17_API_KEY not configured');
-  return key;
-}
+async function scrapePage(
+  page: import('puppeteer').Page,
+  trackingNumber: string
+): Promise<TrackingResult> {
+  await page.goto(`${TRACK_URL}?tLabels=${encodeURIComponent(trackingNumber)}`, {
+    waitUntil: 'networkidle2',
+    timeout: 30000,
+  });
 
-function formatLocation(ev: any): string {
-  const t = ev.location || ev.destinationInfo?.trackingLocation || {};
-  const parts = [t.city, t.state, t.zip].filter(Boolean);
-  return parts.join(', ');
+  // Wait for tracking data to render
+  try {
+    await page.waitForFunction(
+      () => {
+        const el = document.querySelector('.tracking-number, .tracking-status, [class*="tracking"]');
+        return !!el;
+      },
+      { timeout: 15000 }
+    );
+  } catch {
+    // Page might have loaded but with no tracking events yet
+  }
+
+  // Extract tracking events from the page
+  const data = await page.evaluate(() => {
+    const events: Array<{ status: string; detail: string; location: string; date: string; time: string }> = [];
+    let summary = '';
+
+    // Try to find the tracking summary/status
+    const statusEl =
+      document.querySelector('.delivery_status') ||
+      document.querySelector('[class*="status"]') ||
+      document.querySelector('strong');
+    summary = statusEl?.textContent?.trim() || '';
+
+    // Try table-based tracking history
+    const rows = document.querySelectorAll('table tbody tr, .tracking-history tr, [class*="tracking-history"] tr');
+    rows.forEach((row) => {
+      const cells = row.querySelectorAll('td');
+      if (cells.length >= 3) {
+        const date = cells[0]?.textContent?.trim() || '';
+        const time = cells[1]?.textContent?.trim() || '';
+        const status = cells[2]?.textContent?.trim() || '';
+        const location = cells[3]?.textContent?.trim() || '';
+        if (status) {
+          events.push({ status, detail: status, location, date, time });
+        }
+      }
+    });
+
+    // Fallback: try to find tracking data in page text
+    if (events.length === 0) {
+      const pageText = document.body?.innerText || '';
+
+      // Look for common USPS tracking patterns
+      const trackingSection = pageText.match(
+        /Tracking History[\s\S]*?(?=See Less|Track Another|$)/i
+      );
+      if (trackingSection) {
+        const lines = trackingSection[0].split('\n').filter(Boolean);
+        for (const line of lines) {
+          const match = line.match(
+            /^(\w+ \d+, \d{4})\s*,?\s*(\d{1,2}:\d{2}\s*(?:am|pm))\s+(.+)$/i
+          );
+          if (match) {
+            events.push({
+              date: match[1],
+              time: match[2],
+              status: match[3].trim(),
+              detail: match[3].trim(),
+              location: '',
+            });
+          }
+        }
+      }
+    }
+
+    return { summary, events };
+  });
+
+  return {
+    trackingNumber,
+    summary: data.summary || 'Unknown',
+    events: data.events,
+  };
 }
 
 export async function checkTracking(
   trackingNumbers: string[]
 ): Promise<TrackingResult[]> {
+  if (trackingNumbers.length === 0) return [];
+
+  const browser = await puppeteer.launch({
+    headless: true,
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+  });
+
   const results: TrackingResult[] = [];
 
-  // 17track accepts up to 40 tracking numbers per request
-  const chunks: string[][] = [];
-  for (let i = 0; i < trackingNumbers.length; i += 40) {
-    chunks.push(trackingNumbers.slice(i, i + 40));
-  }
-
-  for (const chunk of chunks) {
-    try {
-      const { data } = await axios.post(
-        TRACK17_URL,
-        chunk.map((n) => ({ number: n, carrier: 21051 })),
-        {
-          headers: {
-            '17token': getKey(),
-            'Content-Type': 'application/json',
-          },
-          timeout: 20000,
-        }
-      );
-
-      if (data.code !== 0) {
-        console.error('17TRACK error:', JSON.stringify(data));
-        for (const tn of chunk) results.push({ trackingNumber: tn, summary: '', events: [] });
-        continue;
+  try {
+    for (const tn of trackingNumbers) {
+      const page = await browser.newPage();
+      try {
+        // Set realistic viewport and user agent
+        await page.setViewport({ width: 1280, height: 800 });
+        const result = await scrapePage(page, tn);
+        results.push(result);
+      } catch (err: any) {
+        console.error(`USPS scrape error for ${tn}:`, err.message);
+        results.push({ trackingNumber: tn, summary: '', events: [] });
+      } finally {
+        await page.close();
       }
 
-      const accepted = data.data?.accepted || [];
-      for (let i = 0; i < accepted.length; i++) {
-        const entry = accepted[i];
-        const tn = entry.number || chunk[i] || '';
-
-        // Try different possible response shapes
-        const trackData = entry.track_info || entry.track;
-        if (!trackData) {
-          results.push({ trackingNumber: tn, summary: '', events: [] });
-          continue;
-        }
-
-        // Handle both direct tracking array and nested format
-        const rawEvents = trackData.tracking || trackData.events || (Array.isArray(trackData) ? trackData : []);
-
-        const events: TrackingEvent[] = rawEvents.map((ev: any) => ({
-          status: ev.status || ev.event || '',
-          detail: ev.status || ev.event || '',
-          location: formatLocation(ev),
-          date: ev.date || '',
-          time: ev.time || '',
-        }));
-
-        const summary =
-          trackData.latest_status?.status ||
-          trackData.summary ||
-          events[0]?.status ||
-          'Unknown';
-
-        results.push({ trackingNumber: tn, summary, events });
-      }
-    } catch (err: any) {
-      console.error('17TRACK error:', err?.response?.data || err.message);
-      for (const tn of chunk) results.push({ trackingNumber: tn, summary: '', events: [] });
+      // Be polite — small delay between pages
+      await new Promise((r) => setTimeout(r, 2000));
     }
+  } finally {
+    await browser.close();
   }
 
   return results;
