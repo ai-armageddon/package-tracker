@@ -236,12 +236,24 @@ export default function HomePage() {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-3 flex-wrap">
                         <h3 className="font-semibold">
-                          {item.title || item.trackingNumber}
+                          <a
+                            href={`https://tools.usps.com/tracking/${item.trackingNumber}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="hover:text-blue-400 transition-colors"
+                          >
+                            {item.title || item.trackingNumber}
+                          </a>
                         </h3>
                         {item.title && (
-                          <code className="text-xs bg-gray-800 px-2 py-0.5 rounded text-gray-400">
+                          <a
+                            href={`https://tools.usps.com/tracking/${item.trackingNumber}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-xs bg-gray-800 hover:bg-gray-700 px-2 py-0.5 rounded text-gray-400 hover:text-blue-300 transition-colors underline decoration-gray-600 hover:decoration-blue-400"
+                          >
                             {item.trackingNumber}
-                          </code>
+                          </a>
                         )}
                       </div>
                       {item.note && (
