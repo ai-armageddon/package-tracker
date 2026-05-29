@@ -13,12 +13,6 @@ function shouldCheck(intervalMinutes: number): boolean {
 
 export async function runTrackingCheck() {
   const interval = CHECK_INTERVAL;
-  if (!shouldCheck(interval)) {
-    console.log(
-      `[${new Date().toISOString()}] Skip — not a ${interval}-minute mark`
-    );
-    return;
-  }
 
   console.log(`[${new Date().toISOString()}] Running tracking check...`);
 
@@ -53,17 +47,11 @@ export async function runTrackingCheck() {
     const eventKey = `${latestEvent.status}|${latestEvent.detail}|${latestEvent.date}|${latestEvent.time}`;
     const currentKey = `${item.lastStatus}|${item.lastDetail}|${item.lastStatusDate?.toISOString().slice(0, 10)}`;
 
-    if (eventKey !== currentKey && latestEvent.status) {
-      updates.push({
-        trackingNumber: result.trackingNumber,
-        title: item.title,
-        status: latestEvent.status,
-        detail: latestEvent.detail,
-        location: latestEvent.location,
-        date: latestEvent.date,
-        time: latestEvent.time,
-      });
+    const hadPriorStatus = !!item.lastStatus;
+    const statusChanged = eventKey !== currentKey;
 
+    // Always save latest to DB
+    if (statusChanged && latestEvent.status) {
       await prisma.trackingItem.update({
         where: { id: item.id },
         data: {
@@ -98,6 +86,19 @@ export async function runTrackingCheck() {
         }
       }
     }
+
+    // Only notify if we HAD a prior status AND it changed
+    if (hadPriorStatus && statusChanged && latestEvent.status) {
+      updates.push({
+        trackingNumber: result.trackingNumber,
+        title: item.title,
+        status: latestEvent.status,
+        detail: latestEvent.detail,
+        location: latestEvent.location,
+        date: latestEvent.date,
+        time: latestEvent.time,
+      });
+    }
   }
 
   if (updates.length > 0) {
@@ -114,6 +115,7 @@ export function startScheduler() {
   );
 
   setInterval(() => {
+    if (!shouldCheck(CHECK_INTERVAL)) return;
     runTrackingCheck().catch((err) =>
       console.error('Scheduler error:', err)
     );
