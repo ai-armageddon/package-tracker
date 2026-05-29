@@ -524,7 +524,7 @@ async function handleCheckNow(ctx: Context) {
   try {
     const { runTrackingCheck } = await import('@/jobs/tracking-check');
     await runTrackingCheck();
-    await ctx.reply('✅ Check complete. Use /list to see updated statuses.');
+    await handleList(ctx);
   } catch (err: any) {
     await ctx.reply(`Error: ${err.message}`);
   }
