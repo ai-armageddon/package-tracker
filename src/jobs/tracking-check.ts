@@ -44,7 +44,7 @@ export async function runTrackingCheck() {
     const latestEvent = result.events[0];
     if (!latestEvent) continue;
 
-    // Normalize scraped date to ISO for comparison with stored DB date
+    // Compare using ISO date (no time) — DB only stores the date
     const scrapedIsoDate = latestEvent.date
       ? new Date(latestEvent.date).toISOString().slice(0, 10)
       : '';
@@ -52,7 +52,7 @@ export async function runTrackingCheck() {
       ? new Date(item.lastStatusDate).toISOString().slice(0, 10)
       : '';
 
-    const eventKey = `${latestEvent.status}|${latestEvent.detail}|${scrapedIsoDate}|${latestEvent.time}`;
+    const eventKey = `${latestEvent.status}|${latestEvent.detail}|${scrapedIsoDate}`;
     const currentKey = `${item.lastStatus}|${item.lastDetail}|${storedIsoDate}`;
     const hadPriorStatus = !!item.lastStatus;
     const statusChanged = eventKey !== currentKey;
