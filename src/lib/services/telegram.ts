@@ -204,12 +204,13 @@ function formatStatusBar(
   },
   index: number
 ): string {
-  const num = String(index + 1).padStart(2, ' ');
+  const num = index + 1;
   const label = item.title || item.trackingNumber;
   const status = item.lastStatus || 'No status yet';
-  const loc = item.lastLocation ? ` (${item.lastLocation})` : '';
+  const loc = item.lastLocation ? ` — ${item.lastLocation}` : '';
   const paused = item.active ? '' : ' ⏸️';
-  return `${num}. <b>${escapeHtml(label)}</b>${paused}\n    ${escapeHtml(status)}${escapeHtml(loc)}`;
+  const tn = item.title ? ` ${trackingLink(item.trackingNumber)}` : '';
+  return `${num}. <b>${escapeHtml(label)}</b>${paused}\n   ${tn}\n   ${escapeHtml(status)}${escapeHtml(loc)}`;
 }
 
 async function isAuthorized(ctx: Context): Promise<boolean> {
@@ -236,7 +237,7 @@ async function handleList(ctx: Context) {
 
   const lines = items.map((item, i) => formatStatusBar(item, i));
   await ctx.reply(
-    `📦 <b>Your Packages (${items.length})</b>\n\n${lines.join('\n')}\n\n<i>Click a tracking number to open USPS tracking</i>`,
+    `📦 <b>Your Packages (${items.length})</b>\n\n${lines.join('\n\n')}\n\n<i>Click a tracking number to open USPS tracking</i>`,
     { parse_mode: 'HTML' }
   );
 }
