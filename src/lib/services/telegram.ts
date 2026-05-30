@@ -34,6 +34,10 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+function trackingLink(tn: string): string {
+  return `<a href="https://tools.usps.com/tracking/${encodeURIComponent(tn)}">${escapeHtml(tn)}</a>`;
+}
+
 function isValidTrackingNumber(tn: string): boolean {
   return /^\d{20,22}$/.test(tn);
 }
@@ -166,15 +170,15 @@ async function resolveTrackingRef(ref: string): Promise<ResolveResult> {
     if (tnDist <= 3 && tnDist < bestDist) {
       bestDist = tnDist;
       bestMatch = p.title
-        ? `${escapeHtml(p.title)} (<code>${p.trackingNumber}</code>)`
-        : `<code>${p.trackingNumber}</code>`;
+        ? `${escapeHtml(p.title)} (${trackingLink(p.trackingNumber)})`
+        : `${trackingLink(p.trackingNumber)}`;
     }
     // Check title similarity (case-insensitive)
     if (p.title) {
       const titleDist = levenshtein(trimmed.toLowerCase(), p.title.toLowerCase());
       if (titleDist <= 3 && titleDist < bestDist) {
         bestDist = titleDist;
-        bestMatch = `${escapeHtml(p.title)} (<code>${p.trackingNumber}</code>)`;
+        bestMatch = `${escapeHtml(p.title)} (${trackingLink(p.trackingNumber)})`;
       }
     }
   }
@@ -232,7 +236,7 @@ async function handleList(ctx: Context) {
 
   const lines = items.map((item, i) => formatStatusBar(item, i));
   await ctx.reply(
-    `📦 <b>Your Packages (${items.length})</b>\n\n${lines.join('\n')}\n\n<i>Use numbers like /status 1 or tracking codes</i>`,
+    `📦 <b>Your Packages (${items.length})</b>\n\n${lines.join('\n')}\n\n<i>Click a tracking number to open USPS tracking</i>`,
     { parse_mode: 'HTML' }
   );
 }
@@ -264,7 +268,7 @@ async function handleAdd(ctx: Context, args: string) {
   });
 
   if (existing) {
-    await ctx.reply(`Tracking number <code>${trackingNumber}</code> already exists.`, {
+    await ctx.reply(`Tracking number ${trackingLink(trackingNumber)} already exists.`, {
       parse_mode: 'HTML',
     });
     return;
@@ -276,7 +280,7 @@ async function handleAdd(ctx: Context, args: string) {
     });
     const summary = await fetchAndSaveTracking(trackingNumber);
     await ctx.reply(
-      `✅ Added: <b>${escapeHtml(maybeTitle)}</b>\n🔢 <code>${trackingNumber}</code>${summary ? '\n\n' + summary : ''}`,
+      `✅ Added: <b>${escapeHtml(maybeTitle)}</b>\n🔢 ${trackingLink(trackingNumber)}${summary ? '\n\n' + summary : ''}`,
       { parse_mode: 'HTML' }
     );
     return;
@@ -284,7 +288,7 @@ async function handleAdd(ctx: Context, args: string) {
 
   addSessions.set(String(ctx.chat!.id), { step: 'awaiting_title_yn', trackingNumber });
   await ctx.reply(
-    `<code>${trackingNumber}</code> — Add a title? (Y/N)`,
+    `${trackingLink(trackingNumber)} — Add a title? (Y/N)`,
     { parse_mode: 'HTML' }
   );
 }
@@ -308,7 +312,7 @@ async function handleAddState(ctx: Context, text: string): Promise<boolean> {
       });
       const summary = await fetchAndSaveTracking(session.trackingNumber);
       await ctx.reply(
-        `✅ Added: <code>${session.trackingNumber}</code>${summary ? '\n\n' + summary : ''}`,
+        `✅ Added: ${trackingLink(session.trackingNumber)}${summary ? '\n\n' + summary : ''}`,
         { parse_mode: 'HTML' }
       );
       return true;
@@ -326,7 +330,7 @@ async function handleAddState(ctx: Context, text: string): Promise<boolean> {
     const label = title || session.trackingNumber;
     const summary = await fetchAndSaveTracking(session.trackingNumber);
     await ctx.reply(
-      `✅ Added: <b>${escapeHtml(label)}</b>\n🔢 <code>${session.trackingNumber}</code>${summary ? '\n\n' + summary : ''}`,
+      `✅ Added: <b>${escapeHtml(label)}</b>\n🔢 ${trackingLink(session.trackingNumber)}${summary ? '\n\n' + summary : ''}`,
       { parse_mode: 'HTML' }
     );
     return true;
@@ -345,7 +349,7 @@ async function handleEdit(ctx: Context, ref: string) {
     }
     const lines = items.map((item, i) => {
       const title = item.title || '(no title)';
-      return `${i + 1}. <b>${escapeHtml(title)}</b> — <code>${item.trackingNumber}</code>`;
+      return `${i + 1}. <b>${escapeHtml(title)}</b> — ${trackingLink(item.trackingNumber)}`;
     });
     await ctx.reply(
       `Which package do you want to edit?\n\n${lines.join('\n')}\n\n<i>Reply with the number or tracking code</i>`,
@@ -423,7 +427,7 @@ async function handleEditState(ctx: Context, text: string): Promise<boolean> {
       data: { title: null },
     });
     await ctx.reply(
-      `Title cleared for <code>${session.trackingNumber}</code>`,
+      `Title cleared for ${trackingLink(session.trackingNumber)}`,
       { parse_mode: 'HTML' }
     );
     return true;
@@ -434,7 +438,7 @@ async function handleEditState(ctx: Context, text: string): Promise<boolean> {
     data: { title: newTitle },
   });
   await ctx.reply(
-    `✅ Title updated: <b>${escapeHtml(newTitle)}</b>\n🔢 <code>${session.trackingNumber}</code>`,
+    `✅ Title updated: <b>${escapeHtml(newTitle)}</b>\n🔢 ${trackingLink(session.trackingNumber)}`,
     { parse_mode: 'HTML' }
   );
   return true;
@@ -479,7 +483,7 @@ async function handleStatus(ctx: Context, ref: string) {
 
   const label = withHistory.title || withHistory.trackingNumber;
   const paused = withHistory.active ? '' : ' (paused)';
-  let msg = `📦 <b>${escapeHtml(label)}</b>${paused}\n🔢 <code>${withHistory.trackingNumber}</code>\n\n`;
+  let msg = `📦 <b>${escapeHtml(label)}</b>${paused}\n🔢 ${trackingLink(withHistory.trackingNumber)}\n\n`;
 
   if (withHistory.lastStatus) {
     msg += `📬 <b>${escapeHtml(withHistory.lastStatus)}</b>\n`;
@@ -686,7 +690,7 @@ export async function sendStatusUpdate(
 
   const message = [
     `📦 <b>${escapeHtml(label)}</b>`,
-    `🔢 ${trackingNumber}`,
+    `🔢 ${trackingLink(trackingNumber)}`,
     `📬 <b>${escapeHtml(status)}</b>`,
     detail && `📋 ${escapeHtml(detail)}`,
     loc,
