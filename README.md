@@ -1,14 +1,17 @@
 # USPS Tracking Notifier
 
-Track USPS packages via Shippo and get status notifications through Telegram.
+Track USPS packages and get Telegram notifications when status changes — no API keys required.
 
 ## Features
 
-- Add tracking numbers with optional titles via web UI or Telegram bot
+- Add tracking numbers via web UI or Telegram bot (with optional titles)
 - Automatic status checks on a configurable interval (default: 15 min)
-- Telegram notifications when package status changes
-- Telegram bot with full command support (add, edit, list, status, remove, pause, resume)
-- Status history timeline per package
+- Telegram notifications only when a package's status actually changes — no duplicate pings
+- Fuzzy matching on commands (`/lsit` → suggests `/list`) and tracking numbers/names
+- Clickable tracking numbers in Telegram — tap to open the USPS tracking page
+- Web UI with status cards, tracking history timeline, and direct links to USPS
+- `/check` auto-lists all packages after checking, no need to type `/list` separately
+- Pause/resume individual packages, edit titles, inline notes
 
 ## Quick Start
 
@@ -21,26 +24,25 @@ Track USPS packages via Shippo and get status notifications through Telegram.
 ### Setup
 
 ```bash
-# 1. Clone and install
 git clone <repo-url>
 cd usps-tracking-notifier
 npm install
 
-# 2. Create database
+# Create database
 createdb usps_tracking
 
-# 3. Configure .env
+# Configure
 cp .env.example .env
-# Fill in: DATABASE_URL, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, SHIPPO_API_KEY
+# Fill in: DATABASE_URL, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 
-# 4. Push database schema
+# Setup database
 npx prisma db push
 
-# 5. Find your Telegram chat ID
+# Find your Telegram chat ID (send any message to your bot first)
 ./find-chat.sh
-# Add the output to TELEGRAM_CHAT_ID in .env
+# Copy the chat ID into TELEGRAM_CHAT_ID in .env
 
-# 6. Start
+# Start
 npm run dev
 ```
 
@@ -50,16 +52,16 @@ Open http://localhost:3000 for the web UI, or message your bot on Telegram.
 
 | Command | Description |
 |---|---|
-| `/list` | List all packages (numbered) |
-| `/add <tracking> [title]` | Add a package |
-| `/edit [number or tracking]` | Change a package title |
-| `/status <number or tracking>` | Get detailed status + history |
+| `/list` | List all packages with index, status, and clickable tracking numbers |
+| `/add <tracking> [title]` | Add a package (validates format, asks for title if omitted) |
+| `/edit [number or tracking]` | Change a package title (shows package list if no arg) |
+| `/status <number or tracking>` | Get detailed status + recent history |
 | `/remove <number or tracking>` | Remove a package |
-| `/pause <number or tracking>` | Pause tracking |
-| `/resume <number or tracking>` | Resume tracking |
-| `/check` | Force check now |
+| `/pause <number or tracking>` | Pause tracking for a package |
+| `/resume <number or tracking>` | Resume tracking for a package |
+| `/check` | Force check all packages now + auto-list results |
 
-Tip: use numbers from `/list`, e.g. `/status 1`
+Use numbers from `/list` (e.g. `/status 1`) or partial names — fuzzy matching finds the closest match if you mistype.
 
 ## Environment Variables
 
@@ -70,27 +72,13 @@ Tip: use numbers from `/list`, e.g. `/status 1`
 | `TELEGRAM_CHAT_ID` | Your Telegram chat ID |
 | `CHECK_INTERVAL_MINUTES` | Status check interval (default: 15) |
 
+## How Tracking Works
+
+No external API keys needed. The app uses Puppeteer with a stealth plugin to render the USPS tracking page like a real browser, then extracts status, location, and timeline events from the page. A 3-second cooldown between requests avoids triggering bot detection. Each check opens Chrome once, processes all packages, then closes — keeping resource usage low for the 15-minute interval.
+
 ## Tech Stack
 
 - Next.js 14 + TypeScript + Tailwind CSS
 - Prisma + PostgreSQL
-- Puppeteer + Stealth (scrapes USPS tracking pages)
-- Telegraf (Telegram Bot)
-
-## OpenClaw Integration (AI Chat)
-
-This project includes an [OpenClaw](https://openclaw.ai) skill for natural language chat about your packages via your existing OpenClaw Telegram bot.
-
-### Install the skill
-
-```bash
-# Copy the skill into OpenClaw's managed skills directory
-cp -r openclaw-skill ~/.openclaw/skills/usps-tracking
-
-# Or install as a workspace skill
-openclaw skills install ./openclaw-skill --as usps-tracking
-```
-
-Then restart OpenClaw or start a new session. Your OpenClaw bot will now be able to answer questions like "has my eBay package shipped?" by querying the local tracking API.
-
-The skill is strictly scoped — it will only answer questions about your USPS packages and decline anything else.
+- Puppeteer + Stealth plugin (USPS page scraping)
+- Telegraf (Telegram bot)
