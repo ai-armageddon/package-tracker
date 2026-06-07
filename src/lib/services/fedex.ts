@@ -12,7 +12,7 @@ async function scrapePage(
   page: import('puppeteer').Page,
   trackingNumber: string
 ): Promise<import('./usps').TrackingResult> {
-  const url = `${TRACK_URL}/?trknbr=${encodeURIComponent(trackingNumber)}&locale=en_US`;
+  const url = `${TRACK_URL}/`;
   console.log(`[FedEx] Navigating to: ${url}`);
 
   await page.goto(url, {
@@ -20,14 +20,61 @@ async function scrapePage(
     timeout: 30000,
   });
 
-  // Wait for tracking content to render (FedEx is JS-heavy)
+  // Wait for the tracking form to render
+  await new Promise((r) => setTimeout(r, 4000));
+
+  // Type the tracking number into the input field
+  try {
+    // FedEx uses various input selectors; try multiple
+    await page.waitForSelector('input[name="trackingnumber"], input#trackingnumber, input[aria-label*="track"], input[placeholder*="track"]', { timeout: 10000 });
+  } catch {
+    console.warn('[FedEx] Could not find tracking input field');
+  }
+
+  // Clear and type the tracking number
+  await page.evaluate((tn) => {
+    const inputs = document.querySelectorAll('input');
+    for (const input of inputs) {
+      const name = (input.getAttribute('name') || '').toLowerCase();
+      const id = (input.getAttribute('id') || '').toLowerCase();
+      const placeholder = (input.getAttribute('placeholder') || '').toLowerCase();
+      const ariaLabel = (input.getAttribute('aria-label') || '').toLowerCase();
+      if (
+        name.includes('track') || id.includes('track') ||
+        placeholder.includes('track') || ariaLabel.includes('track')
+      ) {
+        (input as HTMLInputElement).value = tn;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+        return;
+      }
+    }
+  }, trackingNumber);
+
+  // Click the TRACK button
+  await page.evaluate(() => {
+    const buttons = document.querySelectorAll('button, input[type="submit"], a[role="button"]');
+    for (const btn of buttons) {
+      const text = (btn.textContent || '').trim().toUpperCase();
+      const ariaLabel = (btn.getAttribute('aria-label') || '').toUpperCase();
+      if (
+        text === 'TRACK' || text.includes('TRACK') ||
+        ariaLabel === 'TRACK' || ariaLabel.includes('TRACK')
+      ) {
+        (btn as HTMLElement).click();
+        return;
+      }
+    }
+  });
+
+  // Wait for results to load after clicking
   await new Promise((r) => setTimeout(r, 6000));
 
-  // Also wait for key elements
+  // Also wait for content to grow (results will add more text)
   try {
     await page.waitForFunction(
-      () => document.body.innerText.length > 100,
-      { timeout: 5000 }
+      () => document.body.innerText.length > 500,
+      { timeout: 8000 }
     );
   } catch {
     // continue even if timeout
