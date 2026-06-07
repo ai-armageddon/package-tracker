@@ -24,8 +24,8 @@ Track USPS and FedEx packages — get Telegram notifications when status changes
 ### Setup
 
 ```bash
-git clone <repo-url>
-cd usps-tracking-notifier
+git clone https://github.com/ai-armageddon/package-tracker.git
+cd package-tracker
 npm install
 
 # Create database
