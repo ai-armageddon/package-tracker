@@ -1,6 +1,8 @@
 import { prisma } from '@/lib/db/prisma';
 import { checkTracking } from '@/lib/services/usps';
+import { checkFedExTracking } from '@/lib/services/fedex';
 import { sendBatchNotification } from '@/lib/services/telegram';
+import type { Carrier } from '@/lib/services/carriers';
 
 const CHECK_INTERVAL = Number(process.env.CHECK_INTERVAL_MINUTES) || 15;
 
@@ -11,41 +13,61 @@ function shouldCheck(intervalMinutes: number): boolean {
   return seconds < 60 && minutes % intervalMinutes === 0;
 }
 
-export async function runTrackingCheck() {
-  const interval = CHECK_INTERVAL;
+async function checkCarrier(
+  carrier: Carrier,
+  items: Array<{
+    id: string;
+    trackingNumber: string;
+    title: string | null;
+    lastStatus: string | null;
+    lastStatusDate: Date | null;
+    lastDetail: string | null;
+  }>
+): Promise<{
+  updates: Array<{
+    trackingNumber: string;
+    carrier: string;
+    title: string | null;
+    status: string;
+    detail: string;
+    location: string;
+    date: string;
+    time: string;
+  }>;
+  toDelete: string[];
+}> {
+  if (items.length === 0) return { updates: [], toDelete: [] };
 
-  console.log(`[${new Date().toISOString()}] Running tracking check...`);
-
-  const activeItems = await prisma.trackingItem.findMany({
-    where: { active: true },
-  });
-
-  if (activeItems.length === 0) {
-    console.log('No active tracking items.');
-    return;
-  }
-
-  const numbers = activeItems.map((i) => i.trackingNumber);
+  const numbers = items.map((i) => i.trackingNumber);
+  const scraper = carrier === 'FedEx' ? checkFedExTracking : checkTracking;
 
   let results;
   try {
-    results = await checkTracking(numbers);
+    results = await scraper(numbers);
   } catch (err) {
-    console.error('USPS API error:', err);
-    return;
+    console.error(`${carrier} tracking error:`, err);
+    return { updates: [], toDelete: [] };
   }
 
-  const updates: any[] = [];
+  const updates: Array<{
+    trackingNumber: string;
+    carrier: string;
+    title: string | null;
+    status: string;
+    detail: string;
+    location: string;
+    date: string;
+    time: string;
+  }> = [];
   const toDelete: string[] = [];
 
   for (const result of results) {
-    const item = activeItems.find((i) => i.trackingNumber === result.trackingNumber);
+    const item = items.find((i) => i.trackingNumber === result.trackingNumber);
     if (!item) continue;
 
     const latestEvent = result.events[0];
     if (!latestEvent) continue;
 
-    // Compare using ISO date (no time) — DB only stores the date
     const scrapedIsoDate = latestEvent.date
       ? new Date(latestEvent.date).toISOString().slice(0, 10)
       : '';
@@ -58,7 +80,6 @@ export async function runTrackingCheck() {
     const hadPriorStatus = !!item.lastStatus;
     const statusChanged = eventKey !== currentKey;
 
-    // Always save latest to DB
     if (statusChanged && latestEvent.status) {
       await prisma.trackingItem.update({
         where: { id: item.id },
@@ -95,10 +116,10 @@ export async function runTrackingCheck() {
       }
     }
 
-    // Only notify if we HAD a prior status AND it changed
     if (hadPriorStatus && statusChanged && latestEvent.status) {
       updates.push({
         trackingNumber: result.trackingNumber,
+        carrier,
         title: item.title,
         status: latestEvent.status,
         detail: latestEvent.detail,
@@ -113,14 +134,42 @@ export async function runTrackingCheck() {
     }
   }
 
-  if (updates.length > 0) {
-    await sendBatchNotification(updates);
-    console.log(`Sent notifications for ${updates.length} updates.`);
+  return { updates, toDelete };
+}
+
+export async function runTrackingCheck() {
+  console.log(`[${new Date().toISOString()}] Running tracking check...`);
+
+  const activeItems = await prisma.trackingItem.findMany({
+    where: { active: true },
+  });
+
+  if (activeItems.length === 0) {
+    console.log('No active tracking items.');
+    return;
+  }
+
+  const byCarrier = {
+    USPS: activeItems.filter((i) => i.carrier === 'USPS'),
+    FedEx: activeItems.filter((i) => i.carrier === 'FedEx'),
+  };
+
+  const [uspsResult, fedExResult] = await Promise.all([
+    checkCarrier('USPS', byCarrier.USPS),
+    checkCarrier('FedEx', byCarrier.FedEx),
+  ]);
+
+  const allUpdates = [...uspsResult.updates, ...fedExResult.updates];
+  const allDeletes = [...uspsResult.toDelete, ...fedExResult.toDelete];
+
+  if (allUpdates.length > 0) {
+    await sendBatchNotification(allUpdates);
+    console.log(`Sent notifications for ${allUpdates.length} updates.`);
   } else {
     console.log('No status changes detected.');
   }
 
-  for (const id of toDelete) {
+  for (const id of allDeletes) {
     await prisma.trackingItem.delete({ where: { id } });
     console.log(`Auto-deleted delivered package ${id}`);
   }

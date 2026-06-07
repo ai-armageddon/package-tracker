@@ -10,6 +10,7 @@ datasource db {
 model TrackingItem {
   id             String          @id @default(cuid())
   trackingNumber String
+  carrier        String          @default("USPS")
   title          String?
   note           String?
   lastStatus     String?
@@ -21,7 +22,7 @@ model TrackingItem {
   updatedAt      DateTime        @updatedAt
   statusHistory  StatusHistory[]
 
-  @@unique([trackingNumber])
+  @@unique([trackingNumber, carrier])
 }
 
 model StatusHistory {

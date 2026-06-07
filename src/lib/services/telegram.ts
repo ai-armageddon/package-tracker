@@ -2,13 +2,21 @@ import { Telegraf, Context } from 'telegraf';
 import { message } from 'telegraf/filters';
 import { prisma } from '@/lib/db/prisma';
 import { checkTracking } from '@/lib/services/usps';
+import { checkFedExTracking } from '@/lib/services/fedex';
+import {
+  CARRIER_CONFIG,
+  detectCarrier,
+  resolveCarrier,
+} from '@/lib/services/carriers';
+import type { Carrier } from '@/lib/services/carriers';
 
 let bot: Telegraf | null = null;
 let chatId: string | null = null;
 
 type AddState =
-  | { step: 'awaiting_title_yn'; trackingNumber: string }
-  | { step: 'awaiting_title'; trackingNumber: string };
+  | { step: 'awaiting_carrier'; trackingNumber: string }
+  | { step: 'awaiting_title_yn'; trackingNumber: string; carrier: Carrier }
+  | { step: 'awaiting_title'; trackingNumber: string; carrier: Carrier };
 
 type EditState =
   | { step: 'awaiting_title'; itemId: string; trackingNumber: string; oldTitle: string | null };
@@ -34,23 +42,27 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-function trackingLink(tn: string): string {
-  return `<a href="https://tools.usps.com/tracking/${encodeURIComponent(tn)}">${escapeHtml(tn)}</a>`;
+function trackingLink(tn: string, carrier: string = 'USPS'): string {
+  const config = CARRIER_CONFIG[carrier as Carrier] ?? CARRIER_CONFIG.USPS;
+  return `<a href="${config.trackingUrl(tn)}">${escapeHtml(tn)}</a>`;
 }
 
-function isValidTrackingNumber(tn: string): boolean {
-  return /^\d{20,22}$/.test(tn);
+function carrierBadge(carrier: string): string {
+  return carrier === 'FedEx' ? '🟣' : '🔵';
 }
 
-async function fetchAndSaveTracking(tn: string): Promise<string> {
+async function fetchAndSaveTracking(tn: string, carrier: Carrier): Promise<string> {
   try {
-    const results = await checkTracking([tn]);
+    const scraper = carrier === 'FedEx' ? checkFedExTracking : checkTracking;
+    const results = await scraper([tn]);
     const r = results[0];
     if (!r || !r.events.length) return '';
 
     const latest = r.events[0];
 
-    const item = await prisma.trackingItem.findUnique({ where: { trackingNumber: tn } });
+    const item = await prisma.trackingItem.findFirst({
+      where: { trackingNumber: tn, carrier },
+    });
     if (item) {
       await prisma.trackingItem.update({
         where: { id: item.id },
@@ -137,7 +149,6 @@ type ResolveResult =
 async function resolveTrackingRef(ref: string): Promise<ResolveResult> {
   const trimmed = ref.trim();
 
-  // Try as index first (1-based)
   if (/^\d+$/.test(trimmed)) {
     const idx = parseInt(trimmed, 10) - 1;
     const items = await prisma.trackingItem.findMany({ orderBy: { createdAt: 'desc' } });
@@ -147,38 +158,35 @@ async function resolveTrackingRef(ref: string): Promise<ResolveResult> {
     return { item: items[idx] };
   }
 
-  // Try exact tracking number match
   const tn = trimmed.toUpperCase();
-  const exactItem = await prisma.trackingItem.findUnique({ where: { trackingNumber: tn } });
+  const exactItem = await prisma.trackingItem.findFirst({
+    where: { trackingNumber: tn },
+  });
   if (exactItem) return { item: exactItem };
 
-  // Exact title match
   const titleItem = await prisma.trackingItem.findFirst({ where: { title: trimmed } });
   if (titleItem) return { item: titleItem };
 
-  // Fuzzy: look for close tracking number or title match
   const all = await prisma.trackingItem.findMany({
-    select: { trackingNumber: true, title: true },
+    select: { trackingNumber: true, title: true, carrier: true },
   });
 
   let bestMatch: string | null = null;
   let bestDist = Infinity;
 
   for (const p of all) {
-    // Check tracking number similarity
     const tnDist = levenshtein(tn, p.trackingNumber);
     if (tnDist <= 3 && tnDist < bestDist) {
       bestDist = tnDist;
       bestMatch = p.title
-        ? `${escapeHtml(p.title)} (${trackingLink(p.trackingNumber)})`
-        : `${trackingLink(p.trackingNumber)}`;
+        ? `${escapeHtml(p.title)} (${trackingLink(p.trackingNumber, p.carrier)})`
+        : `${trackingLink(p.trackingNumber, p.carrier)}`;
     }
-    // Check title similarity (case-insensitive)
     if (p.title) {
       const titleDist = levenshtein(trimmed.toLowerCase(), p.title.toLowerCase());
       if (titleDist <= 3 && titleDist < bestDist) {
         bestDist = titleDist;
-        bestMatch = `${escapeHtml(p.title)} (${trackingLink(p.trackingNumber)})`;
+        bestMatch = `${escapeHtml(p.title)} (${trackingLink(p.trackingNumber, p.carrier)})`;
       }
     }
   }
@@ -196,6 +204,7 @@ async function resolveTrackingRef(ref: string): Promise<ResolveResult> {
 function formatStatusBar(
   item: {
     trackingNumber: string;
+    carrier: string;
     title: string | null;
     lastStatus: string | null;
     lastStatusDate: Date | null;
@@ -209,8 +218,9 @@ function formatStatusBar(
   const status = item.lastStatus || 'No status yet';
   const loc = item.lastLocation ? ` — ${item.lastLocation}` : '';
   const paused = item.active ? '' : ' ⏸️';
-  const tn = item.title ? ` ${trackingLink(item.trackingNumber)}` : '';
-  return `${num}. <b>${escapeHtml(label)}</b>${paused}\n   ${tn}\n   ${escapeHtml(status)}${escapeHtml(loc)}`;
+  const badge = carrierBadge(item.carrier);
+  const tn = item.title ? ` ${trackingLink(item.trackingNumber, item.carrier)}` : '';
+  return `${num}. ${badge} <b>${escapeHtml(label)}</b>${paused}\n   ${tn}\n   ${escapeHtml(status)}${escapeHtml(loc)}`;
 }
 
 async function isAuthorized(ctx: Context): Promise<boolean> {
@@ -222,8 +232,6 @@ async function isAuthorized(ctx: Context): Promise<boolean> {
   }
   return true;
 }
-
-// ── Command Handlers ──
 
 async function handleList(ctx: Context) {
   const items = await prisma.trackingItem.findMany({
@@ -237,60 +245,93 @@ async function handleList(ctx: Context) {
 
   const lines = items.map((item, i) => formatStatusBar(item, i));
   await ctx.reply(
-    `📦 <b>Your Packages (${items.length})</b>\n\n${lines.join('\n\n')}\n\n<i>Click a tracking number to open USPS tracking</i>`,
+    `📦 <b>Your Packages (${items.length})</b>\n\n${lines.join('\n\n')}\n\n<i>Click a tracking number to open tracking</i>`,
     { parse_mode: 'HTML' }
   );
 }
 
 async function handleAdd(ctx: Context, args: string) {
-  const parts = args.match(/^(\S+)(?:\s+(.+))?$/);
+  // Parse: [/add] [carrier] <tracking> [title]
+  // carrier can be: usps, fedex, f, u
+  // If first token is a known carrier keyword, use it; otherwise treat as tracking number
+  const parts = args.match(/^(\S+)(?:\s+(\S+)(?:\s+(.+))?)?$/);
   if (!parts) {
     await ctx.reply(
-      'Usage: /add &lt;tracking_number&gt; [title]\nExample: /add 9400100000000000',
+      'Usage: /add &lt;tracking_number&gt; [title]\nOr: /add usps|fedex &lt;tracking_number&gt; [title]\nExample: /add 9400100000000000\nExample: /add fedex 123456789012',
       { parse_mode: 'HTML' }
     );
     return;
   }
 
-  const trackingNumber = parts[1].trim().toUpperCase();
+  let carrier: Carrier | null = null;
+  let trackingNumber: string;
+  let maybeTitle: string | undefined;
 
-  if (!isValidTrackingNumber(trackingNumber)) {
+  const first = parts[1].trim();
+  const carrierHint = first.toLowerCase();
+
+  if (carrierHint === 'usps' || carrierHint === 'u' || carrierHint === 'fedex' || carrierHint === 'f' || carrierHint === 'fx') {
+    if (!parts[2]) {
+      await ctx.reply(
+        'Usage: /add usps|fedex &lt;tracking_number&gt; [title]',
+        { parse_mode: 'HTML' }
+      );
+      return;
+    }
+    carrier = resolveCarrier(carrierHint, '') as Carrier;
+    trackingNumber = parts[2].trim().toUpperCase();
+    maybeTitle = parts[3]?.trim();
+  } else {
+    trackingNumber = first.toUpperCase();
+    maybeTitle = parts[2]?.trim();
+    carrier = detectCarrier(trackingNumber);
+  }
+
+  if (!carrier) {
+    addSessions.set(String(ctx.chat!.id), { step: 'awaiting_carrier', trackingNumber });
     await ctx.reply(
-      'Invalid USPS tracking number. Must be 20–22 digits.\nExample: 9400100000000000000000',
+      `Could not auto-detect carrier for <code>${escapeHtml(trackingNumber)}</code>. Reply with <b>USPS</b> or <b>FedEx</b>:`,
       { parse_mode: 'HTML' }
     );
     return;
   }
 
-  const maybeTitle = parts[2]?.trim();
+  if (!CARRIER_CONFIG[carrier].validate(trackingNumber)) {
+    await ctx.reply(
+      `Invalid ${carrier} tracking number format.\nUSPS: 20–22 digits\nFedEx: 12+ digits or DT+12 digits`,
+      { parse_mode: 'HTML' }
+    );
+    return;
+  }
 
-  const existing = await prisma.trackingItem.findUnique({
-    where: { trackingNumber },
+  const existing = await prisma.trackingItem.findFirst({
+    where: { trackingNumber, carrier },
   });
 
   if (existing) {
-    await ctx.reply(`Tracking number ${trackingLink(trackingNumber)} already exists.`, {
-      parse_mode: 'HTML',
-    });
+    await ctx.reply(
+      `${carrierBadge(carrier)} ${trackingLink(trackingNumber, carrier)} already exists.`,
+      { parse_mode: 'HTML' }
+    );
     return;
   }
 
   if (maybeTitle) {
     await prisma.trackingItem.create({
-      data: { trackingNumber, title: maybeTitle, note: null },
+      data: { trackingNumber, carrier, title: maybeTitle, note: null },
     });
-    const summary = await fetchAndSaveTracking(trackingNumber);
+    const summary = await fetchAndSaveTracking(trackingNumber, carrier);
     await ctx.reply(
-      `✅ Added: <b>${escapeHtml(maybeTitle)}</b>\n🔢 ${trackingLink(trackingNumber)}${summary ? '\n\n' + summary : ''}`,
+      `✅ Added: <b>${escapeHtml(maybeTitle)}</b>\n${carrierBadge(carrier)} ${trackingLink(trackingNumber, carrier)}${summary ? '\n\n' + summary : ''}`,
       { parse_mode: 'HTML' }
     );
     await handleList(ctx);
     return;
   }
 
-  addSessions.set(String(ctx.chat!.id), { step: 'awaiting_title_yn', trackingNumber });
+  addSessions.set(String(ctx.chat!.id), { step: 'awaiting_title_yn', trackingNumber, carrier });
   await ctx.reply(
-    `${trackingLink(trackingNumber)} — Add a title? (Y/N)`,
+    `${carrierBadge(carrier)} ${trackingLink(trackingNumber, carrier)} — Add a title? (Y/N)`,
     { parse_mode: 'HTML' }
   );
 }
@@ -300,21 +341,51 @@ async function handleAddState(ctx: Context, text: string): Promise<boolean> {
   const session = addSessions.get(cid);
   if (!session) return false;
 
+  if (session.step === 'awaiting_carrier') {
+    const carrier = resolveCarrier(text.trim(), '');
+    if (!carrier) {
+      await ctx.reply('Please reply with <b>USPS</b> or <b>FedEx</b>.', { parse_mode: 'HTML' });
+      return true;
+    }
+    if (!CARRIER_CONFIG[carrier].validate(session.trackingNumber)) {
+      addSessions.delete(cid);
+      await ctx.reply(
+        `Invalid ${carrier} tracking number: <code>${escapeHtml(session.trackingNumber)}</code>`,
+        { parse_mode: 'HTML' }
+      );
+      return true;
+    }
+    addSessions.set(cid, {
+      step: 'awaiting_title_yn',
+      trackingNumber: session.trackingNumber,
+      carrier,
+    });
+    await ctx.reply(
+      `${carrierBadge(carrier)} ${trackingLink(session.trackingNumber, carrier)} — Add a title? (Y/N)`,
+      { parse_mode: 'HTML' }
+    );
+    return true;
+  }
+
   if (session.step === 'awaiting_title_yn') {
     const answer = text.trim().toLowerCase();
     if (answer === 'y' || answer === 'yes') {
-      addSessions.set(cid, { step: 'awaiting_title', trackingNumber: session.trackingNumber });
+      addSessions.set(cid, {
+        step: 'awaiting_title',
+        trackingNumber: session.trackingNumber,
+        carrier: session.carrier,
+      });
       await ctx.reply('Enter title:');
       return true;
     }
     if (answer === 'n' || answer === 'no') {
       addSessions.delete(cid);
       await prisma.trackingItem.create({
-        data: { trackingNumber: session.trackingNumber, title: null, note: null },
+        data: { trackingNumber: session.trackingNumber, carrier: session.carrier, title: null, note: null },
       });
-      const summary = await fetchAndSaveTracking(session.trackingNumber);
+      const summary = await fetchAndSaveTracking(session.trackingNumber, session.carrier);
       await ctx.reply(
-        `✅ Added: ${trackingLink(session.trackingNumber)}${summary ? '\n\n' + summary : ''}`,
+        `✅ Added: ${carrierBadge(session.carrier)} ${trackingLink(session.trackingNumber, session.carrier)}${summary ? '\n\n' + summary : ''}`,
         { parse_mode: 'HTML' }
       );
       await handleList(ctx);
@@ -328,12 +399,12 @@ async function handleAddState(ctx: Context, text: string): Promise<boolean> {
     const title = text.trim() || null;
     addSessions.delete(cid);
     await prisma.trackingItem.create({
-      data: { trackingNumber: session.trackingNumber, title, note: null },
+      data: { trackingNumber: session.trackingNumber, carrier: session.carrier, title, note: null },
     });
     const label = title || session.trackingNumber;
-    const summary = await fetchAndSaveTracking(session.trackingNumber);
+    const summary = await fetchAndSaveTracking(session.trackingNumber, session.carrier);
     await ctx.reply(
-      `✅ Added: <b>${escapeHtml(label)}</b>\n🔢 ${trackingLink(session.trackingNumber)}${summary ? '\n\n' + summary : ''}`,
+      `✅ Added: <b>${escapeHtml(label)}</b>\n${carrierBadge(session.carrier)} ${trackingLink(session.trackingNumber, session.carrier)}${summary ? '\n\n' + summary : ''}`,
       { parse_mode: 'HTML' }
     );
     await handleList(ctx);
@@ -344,7 +415,6 @@ async function handleAddState(ctx: Context, text: string): Promise<boolean> {
 }
 
 async function handleEdit(ctx: Context, ref: string) {
-  // Show package list if no ref provided
   if (!ref) {
     const items = await prisma.trackingItem.findMany({ orderBy: { createdAt: 'desc' } });
     if (items.length === 0) {
@@ -353,7 +423,7 @@ async function handleEdit(ctx: Context, ref: string) {
     }
     const lines = items.map((item, i) => {
       const title = item.title || '(no title)';
-      return `${i + 1}. <b>${escapeHtml(title)}</b> — ${trackingLink(item.trackingNumber)}`;
+      return `${i + 1}. ${carrierBadge(item.carrier)} <b>${escapeHtml(title)}</b> — ${trackingLink(item.trackingNumber, item.carrier)}`;
     });
     await ctx.reply(
       `Which package do you want to edit?\n\n${lines.join('\n')}\n\n<i>Reply with the number or tracking code</i>`,
@@ -397,7 +467,6 @@ async function handleEditState(ctx: Context, text: string): Promise<boolean> {
   const session = editSessions.get(cid);
   if (!session) return false;
 
-  // If itemId is empty, user is selecting which package to edit
   if (!session.itemId) {
     const resolved = await resolveTrackingRef(text);
     if ('error' in resolved) {
@@ -430,8 +499,9 @@ async function handleEditState(ctx: Context, text: string): Promise<boolean> {
       where: { id: session.itemId },
       data: { title: null },
     });
+    const item = await prisma.trackingItem.findUnique({ where: { id: session.itemId } });
     await ctx.reply(
-      `Title cleared for ${trackingLink(session.trackingNumber)}`,
+      `Title cleared for ${trackingLink(session.trackingNumber, item?.carrier ?? 'USPS')}`,
       { parse_mode: 'HTML' }
     );
     return true;
@@ -441,8 +511,9 @@ async function handleEditState(ctx: Context, text: string): Promise<boolean> {
     where: { id: session.itemId },
     data: { title: newTitle },
   });
+  const item = await prisma.trackingItem.findUnique({ where: { id: session.itemId } });
   await ctx.reply(
-    `✅ Title updated: <b>${escapeHtml(newTitle)}</b>\n🔢 ${trackingLink(session.trackingNumber)}`,
+    `✅ Title updated: <b>${escapeHtml(newTitle)}</b>\n${trackingLink(session.trackingNumber, item?.carrier ?? 'USPS')}`,
     { parse_mode: 'HTML' }
   );
   return true;
@@ -503,9 +574,10 @@ async function handleStatus(ctx: Context, ref: string) {
     return;
   }
 
+  const badge = carrierBadge(withHistory.carrier);
   const label = withHistory.title || withHistory.trackingNumber;
   const paused = withHistory.active ? '' : ' (paused)';
-  let msg = `📦 <b>${escapeHtml(label)}</b>${paused}\n🔢 ${trackingLink(withHistory.trackingNumber)}\n\n`;
+  let msg = `${badge} 📦 <b>${escapeHtml(label)}</b>${paused}\n🔢 ${trackingLink(withHistory.trackingNumber, withHistory.carrier)}\n\n`;
 
   if (withHistory.lastStatus) {
     msg += `📬 <b>${escapeHtml(withHistory.lastStatus)}</b>\n`;
@@ -556,8 +628,6 @@ async function handleCheckNow(ctx: Context) {
   }
 }
 
-// ── Start / Stop ──
-
 export function startBot() {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) {
@@ -574,18 +644,19 @@ export function startBot() {
 
   bot.start(async (ctx) => {
     await ctx.reply(
-      'Welcome to USPS Tracking Bot!\n\n' +
+      'Welcome to Package Tracking Bot!\n\n' +
+        'Supports USPS and FedEx.\n\n' +
         'Commands:\n' +
         '/list — List all packages (numbered)\n' +
-        '/add &lt;tracking&gt; [title] — Add a package\n' +
+        '/add &lt;tracking&gt; [title] — Add a package (auto-detect carrier)\n' +
+        '/add usps|fedex &lt;tracking&gt; [title] — Add with explicit carrier\n' +
         '/edit [number or tracking] — Change a package title\n' +
         '/status &lt;number or tracking&gt; — Get detailed status\n' +
         '/remove &lt;number or tracking&gt; — Remove a package (multi: /remove 1,3)\n' +
         '/pause &lt;number or tracking&gt; — Pause tracking\n' +
         '/resume &lt;number or tracking&gt; — Resume tracking\n' +
         '/check — Force check now\n\n' +
-        'Tip: Use numbers from /list, e.g. /status 1\n' +
-        'Or just ask me about your packages!',
+        'Tip: Use numbers from /list, e.g. /status 1',
       { parse_mode: 'HTML' },
     );
   });
@@ -596,7 +667,7 @@ export function startBot() {
   bot.command('add', async (ctx) => {
     const args = ctx.message.text.replace(/^\/add\s*/, '').trim();
     if (!args) {
-      await ctx.reply('Usage: /add &lt;tracking_number&gt; [title]');
+      await ctx.reply('Usage: /add &lt;tracking_number&gt; [title]\nOr: /add usps|fedex &lt;tracking_number&gt; [title]');
       return;
     }
     await handleAdd(ctx, args);
@@ -649,7 +720,8 @@ export function startBot() {
     ctx.reply(
       'Commands:\n' +
         '/list — List all packages (numbered)\n' +
-        '/add &lt;tracking&gt; [title] — Add a package\n' +
+        '/add &lt;tracking&gt; [title] — Add a package (auto-detect)\n' +
+        '/add usps|fedex &lt;tracking&gt; [title] — Explicit carrier\n' +
         '/edit [number or tracking] — Change a package title\n' +
         '/status &lt;number or tracking&gt; — Get detailed status\n' +
         '/remove &lt;number or tracking&gt; — Remove a package (multi: /remove 1,3)\n' +
@@ -695,11 +767,10 @@ export function startBot() {
   process.once('SIGTERM', () => { bot?.stop('SIGTERM'); });
 }
 
-// ── Notification exports (unchanged contract) ──
-
 export async function sendStatusUpdate(
   trackingNumber: string,
   title: string | null,
+  carrier: string,
   status: string,
   detail: string,
   location: string,
@@ -709,10 +780,11 @@ export async function sendStatusUpdate(
   const label = title || trackingNumber;
   const loc = location ? `📍 ${location}` : '';
   const when = date && time ? `🕐 ${date} ${time}` : '';
+  const badge = carrierBadge(carrier);
 
   const message = [
-    `📦 <b>${escapeHtml(label)}</b>`,
-    `🔢 ${trackingLink(trackingNumber)}`,
+    `${badge} 📦 <b>${escapeHtml(label)}</b>`,
+    `🔢 ${trackingLink(trackingNumber, carrier)}`,
     `📬 <b>${escapeHtml(status)}</b>`,
     detail && `📋 ${escapeHtml(detail)}`,
     loc,
@@ -730,6 +802,7 @@ export async function sendBatchNotification(
   updates: Array<{
     trackingNumber: string;
     title: string | null;
+    carrier?: string;
     status: string;
     detail: string;
     location: string;
@@ -741,13 +814,14 @@ export async function sendBatchNotification(
 
   if (updates.length === 1) {
     const u = updates[0];
-    await sendStatusUpdate(u.trackingNumber, u.title, u.status, u.detail, u.location, u.date, u.time);
+    await sendStatusUpdate(u.trackingNumber, u.title, u.carrier ?? 'USPS', u.status, u.detail, u.location, u.date, u.time);
     return;
   }
 
   const lines = updates.map((u) => {
     const label = u.title ? `${u.title} (${u.trackingNumber})` : u.trackingNumber;
-    return `• <b>${escapeHtml(label)}</b>: ${escapeHtml(u.status)}`;
+    const badge = carrierBadge(u.carrier ?? 'USPS');
+    return `${badge} • <b>${escapeHtml(label)}</b>: ${escapeHtml(u.status)}`;
   });
 
   const message = [`📬 <b>${updates.length} tracking updates</b>`, '', ...lines].join('\n');

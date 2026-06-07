@@ -16,6 +16,7 @@ interface StatusEvent {
 interface TrackingWithHistory {
   id: string;
   trackingNumber: string;
+  carrier: string;
   title: string | null;
   note: string | null;
   lastStatus: string | null;
@@ -24,6 +25,24 @@ interface TrackingWithHistory {
   lastLocation: string | null;
   active: boolean;
   statusHistory: StatusEvent[];
+}
+
+function carrierBorder(carrier: string) {
+  if (carrier === 'USPS') return 'border-l-blue-500/30';
+  if (carrier === 'FedEx') return 'border-l-purple-500/30';
+  return 'border-l-gray-600';
+}
+
+function carrierHighlight(carrier: string) {
+  if (carrier === 'USPS') return 'bg-blue-500 border-blue-500';
+  if (carrier === 'FedEx') return 'bg-purple-500 border-purple-500';
+  return 'bg-gray-500 border-gray-500';
+}
+
+function carrierGradient(carrier: string) {
+  if (carrier === 'USPS') return 'from-blue-950/10';
+  if (carrier === 'FedEx') return 'from-purple-950/10';
+  return 'from-transparent';
 }
 
 export default function HistoryPage() {
@@ -89,7 +108,7 @@ export default function HistoryPage() {
           No status events recorded yet.
         </p>
       ) : (
-        <div className="relative pl-6 border-l border-gray-800 space-y-6">
+        <div className={`relative pl-6 border-l ${carrierBorder(data.carrier)} space-y-6`}>
           {data.statusHistory.map((event, i) => (
             <div
               key={event.id}
@@ -106,11 +125,11 @@ export default function HistoryPage() {
               <div
                 className={`absolute -left-[25px] top-1 w-2.5 h-2.5 rounded-full border-2 transition-all duration-500 ${
                   i === 0
-                    ? 'bg-blue-500 border-blue-500 animate-pulse-subtle'
+                    ? `${carrierHighlight(data.carrier)} animate-pulse-subtle`
                     : 'bg-gray-800 border-gray-600'
                 }`}
               />
-              <div className="bg-gray-900 border border-gray-800 rounded-lg p-4 transition-colors hover:border-gray-700">
+              <div className={`bg-gray-900 border border-gray-800 rounded-lg p-4 transition-colors hover:border-gray-700 bg-gradient-to-r ${carrierGradient(data.carrier)} to-transparent`}>
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <span className="font-medium text-blue-400">

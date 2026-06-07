@@ -10,6 +10,8 @@ module.exports = {
         'slide-in-right': 'slideInRight 0.3s ease-out',
         'scale-in': 'scaleIn 0.2s ease-out',
         'pulse-subtle': 'pulseSubtle 2s ease-in-out infinite',
+        'gradient-usps': 'gradientUsps 8s ease-in-out infinite',
+        'gradient-fedex': 'gradientFedex 8s ease-in-out infinite',
       },
       keyframes: {
         fadeIn: {
@@ -35,6 +37,14 @@ module.exports = {
         pulseSubtle: {
           '0%, 100%': { opacity: '1' },
           '50%': { opacity: '0.5' },
+        },
+        gradientUsps: {
+          '0%, 100%': { backgroundPosition: '0% 50%' },
+          '50%': { backgroundPosition: '100% 50%' },
+        },
+        gradientFedex: {
+          '0%, 100%': { backgroundPosition: '0% 50%' },
+          '50%': { backgroundPosition: '100% 50%' },
         },
       },
     },

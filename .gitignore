@@ -7,9 +7,8 @@ node_modules/
 .env.local
 .env.*.local
 
-# IDE
-.vscode/
-.idea/
+# Build artifacts
+tsconfig.tsbuildinfo
 
 # OS
 .DS_Store

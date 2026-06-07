@@ -9,6 +9,7 @@ export async function GET() {
     select: {
       id: true,
       trackingNumber: true,
+      carrier: true,
       title: true,
       note: true,
       lastStatus: true,

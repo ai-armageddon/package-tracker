@@ -6,6 +6,7 @@ import Link from 'next/link';
 interface TrackingItem {
   id: string;
   trackingNumber: string;
+  carrier: string;
   title: string | null;
   note: string | null;
   lastStatus: string | null;
@@ -17,10 +18,61 @@ interface TrackingItem {
   updatedAt: string;
 }
 
+const TRACKING_URLS: Record<string, (tn: string) => string> = {
+  USPS: (tn) => `https://tools.usps.com/tracking/${encodeURIComponent(tn)}`,
+  FedEx: (tn) => `https://www.fedex.com/fedextrack/?trknbr=${encodeURIComponent(tn)}`,
+};
+
+function detectCarrier(tn: string): string | null {
+  const cleaned = tn.trim();
+  if (/^\d{20,22}$/.test(cleaned)) return 'USPS';
+  if (/^\d{12,22}$/.test(cleaned) || /^DT\d{12}$/i.test(cleaned.toUpperCase())) return 'FedEx';
+  return null;
+}
+
+function carrierBadge(carrier: string) {
+  const colors: Record<string, string> = {
+    USPS: 'bg-blue-900/40 text-blue-400 border-blue-800',
+    FedEx: 'bg-purple-900/40 text-purple-400 border-purple-800',
+  };
+  return (
+    <span
+      className={`text-[10px] px-1.5 py-0.5 rounded border font-medium uppercase tracking-wider ${
+        colors[carrier] || 'bg-gray-800 text-gray-400 border-gray-700'
+      }`}
+    >
+      {carrier}
+    </span>
+  );
+}
+
+function carrierCardStyle(carrier: string) {
+  switch (carrier) {
+    case 'USPS':
+      return 'border-l-blue-600/40 from-blue-950/20';
+    case 'FedEx':
+      return 'border-l-purple-600/40 from-purple-950/20';
+    default:
+      return 'border-l-gray-600 from-transparent';
+  }
+}
+
+function carrierGradientAnim(carrier: string) {
+  switch (carrier) {
+    case 'USPS':
+      return 'animate-gradient-usps';
+    case 'FedEx':
+      return 'animate-gradient-fedex';
+    default:
+      return '';
+  }
+}
+
 export default function HomePage() {
   const [items, setItems] = useState<TrackingItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [form, setForm] = useState({ trackingNumber: '', title: '', note: '' });
+  const [form, setForm] = useState({ trackingNumber: '', carrier: 'USPS', title: '', note: '' });
+  const [detectedCarrier, setDetectedCarrier] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState('');
   const [checking, setChecking] = useState(false);
@@ -40,6 +92,16 @@ export default function HomePage() {
     setTimeout(() => setMounted(true), 50);
   }, [fetchItems]);
 
+  function handleTrackingChange(value: string) {
+    const detected = detectCarrier(value);
+    setDetectedCarrier(detected);
+    setForm((prev) => ({
+      ...prev,
+      trackingNumber: value,
+      carrier: detected || prev.carrier,
+    }));
+  }
+
   async function handleAdd(e: React.FormEvent) {
     e.preventDefault();
     setError('');
@@ -56,7 +118,8 @@ export default function HomePage() {
     if (!res.ok) {
       setError(data.error || 'Failed to add');
     } else {
-      setForm({ trackingNumber: '', title: '', note: '' });
+      setForm({ trackingNumber: '', carrier: 'USPS', title: '', note: '' });
+      setDetectedCarrier(null);
       fetchItems();
     }
     setAdding(false);
@@ -106,12 +169,31 @@ export default function HomePage() {
       <div className={`bg-gray-900 border border-gray-800 rounded-lg p-6 transition-all duration-500 ${mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'}`}>
         <h2 className="text-lg font-semibold mb-4">Add Tracking Number</h2>
         <form onSubmit={handleAdd} className="space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+            <div className="flex items-center gap-2">
+              <select
+                value={form.carrier}
+                onChange={(e) => setForm({ ...form, carrier: e.target.value })}
+                className="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500 transition-colors duration-200 w-full"
+              >
+                <option value="USPS">USPS</option>
+                <option value="FedEx">FedEx</option>
+              </select>
+              {detectedCarrier && (
+                <span className={`text-[10px] px-1.5 py-0.5 rounded border font-medium uppercase tracking-wider whitespace-nowrap ${
+                  detectedCarrier === 'USPS'
+                    ? 'bg-blue-900/20 text-blue-400/60 border-blue-800/40'
+                    : 'bg-purple-900/20 text-purple-400/60 border-purple-800/40'
+                }`}>
+                  auto
+                </span>
+              )}
+            </div>
             <input
               type="text"
               placeholder="Tracking number *"
               value={form.trackingNumber}
-              onChange={(e) => setForm({ ...form, trackingNumber: e.target.value })}
+              onChange={(e) => handleTrackingChange(e.target.value)}
               className="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500 transition-colors duration-200"
             />
             <input
@@ -183,11 +265,12 @@ export default function HomePage() {
           {items.map((item, i) => (
             <div
               key={item.id}
-              className={`bg-gray-900 border rounded-lg p-5 transition-all duration-300 hover:border-gray-600 ${
+              className={`bg-gray-900 border border-l-2 rounded-lg p-5 transition-all duration-300 hover:border-gray-500 ${
                 item.active ? 'border-gray-700' : 'border-gray-800 opacity-50'
-              }`}
+              } ${carrierCardStyle(item.carrier)} ${carrierGradientAnim(item.carrier)}`}
               style={{
-                opacity: mounted ? 1 : 0,
+                backgroundSize: '200% 100%',
+                opacity: mounted ? (item.active ? 1 : 0.5) : 0,
                 transform: mounted ? 'translateY(0)' : 'translateY(12px)',
                 transitionDelay: `${i * 60}ms`,
                 transitionDuration: '400ms',
@@ -235,9 +318,10 @@ export default function HomePage() {
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-3 flex-wrap">
+                        {carrierBadge(item.carrier)}
                         <h3 className="font-semibold">
                           <a
-                            href={`https://tools.usps.com/tracking/${item.trackingNumber}`}
+                            href={(TRACKING_URLS[item.carrier] || TRACKING_URLS.USPS)(item.trackingNumber)}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="hover:text-blue-400 transition-colors"
@@ -247,7 +331,7 @@ export default function HomePage() {
                         </h3>
                         {item.title && (
                           <a
-                            href={`https://tools.usps.com/tracking/${item.trackingNumber}`}
+                            href={(TRACKING_URLS[item.carrier] || TRACKING_URLS.USPS)(item.trackingNumber)}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="text-xs bg-gray-800 hover:bg-gray-700 px-2 py-0.5 rounded text-gray-400 hover:text-blue-300 transition-colors underline decoration-gray-600 hover:decoration-blue-400"
