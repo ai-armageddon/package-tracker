@@ -1,15 +1,20 @@
 import puppeteer from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
+import * as fs from 'fs';
+import * as path from 'path';
 
 puppeteer.use(StealthPlugin());
 
 const TRACK_URL = 'https://www.fedex.com/fedextrack';
+const DEBUG_DIR = '/tmp/fedex-debug';
 
 async function scrapePage(
   page: import('puppeteer').Page,
   trackingNumber: string
 ): Promise<import('./usps').TrackingResult> {
   const url = `${TRACK_URL}/?trknbr=${encodeURIComponent(trackingNumber)}&locale=en_US`;
+  console.log(`[FedEx] Navigating to: ${url}`);
+
   await page.goto(url, {
     waitUntil: 'domcontentloaded',
     timeout: 30000,
@@ -26,6 +31,30 @@ async function scrapePage(
     );
   } catch {
     // continue even if timeout
+  }
+
+  const bodyText = await page.evaluate(() => document.body.innerText);
+  const textContent = await page.evaluate(() => document.body.textContent || '');
+  const finalText = bodyText.length > textContent.length ? bodyText : textContent;
+
+  console.log(`[FedEx] Text length: innerText=${bodyText.length}, textContent=${textContent.length}`);
+  console.log(`[FedEx] Text preview (first 800 chars):\n${finalText.substring(0, 800)}`);
+
+  // Save debug snapshot
+  try {
+    if (!fs.existsSync(DEBUG_DIR)) fs.mkdirSync(DEBUG_DIR, { recursive: true });
+    const snapshot = {
+      url,
+      timestamp: new Date().toISOString(),
+      innerTextLength: bodyText.length,
+      textContentLength: textContent.length,
+      text: finalText,
+    };
+    const file = path.join(DEBUG_DIR, `${trackingNumber}-${Date.now()}.json`);
+    fs.writeFileSync(file, JSON.stringify(snapshot, null, 2));
+    console.log(`[FedEx] Debug snapshot saved to: ${file}`);
+  } catch (e) {
+    console.warn('[FedEx] Could not save debug snapshot:', e);
   }
 
   const data = await page.evaluate(() => {
