@@ -50,9 +50,20 @@ async function scrapePage(
       textContentLength: textContent.length,
       text: finalText,
     };
-    const file = path.join(DEBUG_DIR, `${trackingNumber}-${Date.now()}.json`);
-    fs.writeFileSync(file, JSON.stringify(snapshot, null, 2));
-    console.log(`[FedEx] Debug snapshot saved to: ${file}`);
+    const baseName = `${trackingNumber}-${Date.now()}`;
+    const jsonFile = path.join(DEBUG_DIR, `${baseName}.json`);
+    const screenshotFile = path.join(DEBUG_DIR, `${baseName}.png`);
+    const htmlFile = path.join(DEBUG_DIR, `${baseName}.html`);
+
+    fs.writeFileSync(jsonFile, JSON.stringify(snapshot, null, 2));
+    await page.screenshot({ path: screenshotFile, fullPage: true });
+    const html = await page.content();
+    fs.writeFileSync(htmlFile, html);
+
+    console.log(`[FedEx] Debug files saved:`);
+    console.log(`[FedEx]   Screenshot: ${screenshotFile}`);
+    console.log(`[FedEx]   JSON:      ${jsonFile}`);
+    console.log(`[FedEx]   HTML:      ${htmlFile}`);
   } catch (e) {
     console.warn('[FedEx] Could not save debug snapshot:', e);
   }
