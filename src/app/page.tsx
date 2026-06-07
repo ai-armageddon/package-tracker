@@ -49,11 +49,11 @@ function carrierBadge(carrier: string) {
 function carrierCardStyle(carrier: string) {
   switch (carrier) {
     case 'USPS':
-      return 'border-l-blue-600/40 from-blue-950/20';
+      return 'border-l-blue-500/50 bg-gradient-to-r from-blue-600/15 via-blue-500/5 to-transparent';
     case 'FedEx':
-      return 'border-l-purple-600/40 from-purple-950/20';
+      return 'border-l-purple-500/50 bg-gradient-to-r from-purple-600/15 via-purple-500/5 to-transparent';
     default:
-      return 'border-l-gray-600 from-transparent';
+      return 'border-l-gray-600';
   }
 }
 
@@ -170,25 +170,6 @@ export default function HomePage() {
         <h2 className="text-lg font-semibold mb-4">Add Tracking Number</h2>
         <form onSubmit={handleAdd} className="space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-            <div className="flex items-center gap-2">
-              <select
-                value={form.carrier}
-                onChange={(e) => setForm({ ...form, carrier: e.target.value })}
-                className="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500 transition-colors duration-200 w-full"
-              >
-                <option value="USPS">USPS</option>
-                <option value="FedEx">FedEx</option>
-              </select>
-              {detectedCarrier && (
-                <span className={`text-[10px] px-1.5 py-0.5 rounded border font-medium uppercase tracking-wider whitespace-nowrap ${
-                  detectedCarrier === 'USPS'
-                    ? 'bg-blue-900/20 text-blue-400/60 border-blue-800/40'
-                    : 'bg-purple-900/20 text-purple-400/60 border-purple-800/40'
-                }`}>
-                  auto
-                </span>
-              )}
-            </div>
             <input
               type="text"
               placeholder="Tracking number *"
@@ -210,6 +191,33 @@ export default function HomePage() {
               onChange={(e) => setForm({ ...form, note: e.target.value })}
               className="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500 transition-colors duration-200"
             />
+            <div className="sm:col-span-4">
+              {form.trackingNumber && (
+                <div className="flex items-center gap-3 animate-fade-in">
+                  <span className="text-sm text-gray-400">Carrier:</span>
+                  <select
+                    value={form.carrier}
+                    onChange={(e) => setForm({ ...form, carrier: e.target.value })}
+                    className="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500 transition-colors duration-200"
+                  >
+                    <option value="USPS">USPS</option>
+                    <option value="FedEx">FedEx</option>
+                  </select>
+                  {detectedCarrier && (
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded border font-medium uppercase tracking-wider whitespace-nowrap ${
+                      detectedCarrier === 'USPS'
+                        ? 'bg-blue-900/20 text-blue-400/60 border-blue-800/40'
+                        : 'bg-purple-900/20 text-purple-400/60 border-purple-800/40'
+                    }`}>
+                      {detectedCarrier === form.carrier ? 'auto' : 'mismatch'}
+                    </span>
+                  )}
+                  <span className="text-xs text-gray-500">
+                    {form.carrier === 'USPS' ? '20-22 digits' : '12+ digits'}
+                  </span>
+                </div>
+              )}
+            </div>
           </div>
           {error && (
             <p className="text-red-400 text-sm animate-fade-in">{error}</p>
