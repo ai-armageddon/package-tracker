@@ -193,7 +193,7 @@ export default function HomePage() {
             />
             <div className="sm:col-span-4">
               {form.trackingNumber && (
-                <div className="flex items-center gap-3 animate-fade-in">
+                <div className="flex items-center gap-3 animate-fade-in -ml-[5%]">
                   <span className="text-sm text-gray-400">Carrier:</span>
                   <select
                     value={form.carrier}
