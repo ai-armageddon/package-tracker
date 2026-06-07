@@ -36,6 +36,7 @@ export async function runTrackingCheck() {
   }
 
   const updates: any[] = [];
+  const toDelete: string[] = [];
 
   for (const result of results) {
     const item = activeItems.find((i) => i.trackingNumber === result.trackingNumber);
@@ -105,6 +106,10 @@ export async function runTrackingCheck() {
         date: latestEvent.date,
         time: latestEvent.time,
       });
+
+      if (/delivered/i.test(latestEvent.status)) {
+        toDelete.push(item.id);
+      }
     }
   }
 
@@ -113,6 +118,11 @@ export async function runTrackingCheck() {
     console.log(`Sent notifications for ${updates.length} updates.`);
   } else {
     console.log('No status changes detected.');
+  }
+
+  for (const id of toDelete) {
+    await prisma.trackingItem.delete({ where: { id } });
+    console.log(`Auto-deleted delivered package ${id}`);
   }
 }
 

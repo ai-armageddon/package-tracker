@@ -284,6 +284,7 @@ async function handleAdd(ctx: Context, args: string) {
       `✅ Added: <b>${escapeHtml(maybeTitle)}</b>\n🔢 ${trackingLink(trackingNumber)}${summary ? '\n\n' + summary : ''}`,
       { parse_mode: 'HTML' }
     );
+    await handleList(ctx);
     return;
   }
 
@@ -316,6 +317,7 @@ async function handleAddState(ctx: Context, text: string): Promise<boolean> {
         `✅ Added: ${trackingLink(session.trackingNumber)}${summary ? '\n\n' + summary : ''}`,
         { parse_mode: 'HTML' }
       );
+      await handleList(ctx);
       return true;
     }
     await ctx.reply('Please answer Y or N. Add a title?');
@@ -334,6 +336,7 @@ async function handleAddState(ctx: Context, text: string): Promise<boolean> {
       `✅ Added: <b>${escapeHtml(label)}</b>\n🔢 ${trackingLink(session.trackingNumber)}${summary ? '\n\n' + summary : ''}`,
       { parse_mode: 'HTML' }
     );
+    await handleList(ctx);
     return true;
   }
 
@@ -446,19 +449,37 @@ async function handleEditState(ctx: Context, text: string): Promise<boolean> {
 }
 
 async function handleRemove(ctx: Context, ref: string) {
-  const resolved = await resolveTrackingRef(ref);
-  if ('error' in resolved) {
-    const msg = resolved.suggestion
-      ? `${resolved.error}. ${resolved.suggestion}`
-      : resolved.error;
-    await ctx.reply(msg, { parse_mode: 'HTML' });
+  const refs = ref.split(/[, ]+/).filter(Boolean);
+  if (refs.length === 0) {
+    await ctx.reply('Usage: /remove &lt;number or tracking_number&gt;\nAccept multiple: /remove 1,3 or /remove 2 3');
     return;
   }
 
-  const item = resolved.item!;
-  await prisma.trackingItem.delete({ where: { id: item.id } });
-  const label = item.title || item.trackingNumber;
-  await ctx.reply(`🗑️ Removed: <b>${escapeHtml(label)}</b>`, { parse_mode: 'HTML' });
+  const removed: string[] = [];
+  const errors: string[] = [];
+
+  for (const r of refs) {
+    const resolved = await resolveTrackingRef(r);
+    if ('error' in resolved) {
+      errors.push(resolved.error);
+      continue;
+    }
+    const item = resolved.item!;
+    await prisma.trackingItem.delete({ where: { id: item.id } });
+    removed.push(item.title || item.trackingNumber);
+  }
+
+  if (removed.length > 0) {
+    await ctx.reply(
+      `🗑️ Removed: <b>${removed.map((l) => escapeHtml(l)).join(', ')}</b>`,
+      { parse_mode: 'HTML' }
+    );
+  }
+  if (errors.length > 0) {
+    await ctx.reply(errors.join('\n'), { parse_mode: 'HTML' });
+  }
+
+  await handleList(ctx);
 }
 
 async function handleStatus(ctx: Context, ref: string) {
@@ -559,7 +580,7 @@ export function startBot() {
         '/add &lt;tracking&gt; [title] — Add a package\n' +
         '/edit [number or tracking] — Change a package title\n' +
         '/status &lt;number or tracking&gt; — Get detailed status\n' +
-        '/remove &lt;number or tracking&gt; — Remove a package\n' +
+        '/remove &lt;number or tracking&gt; — Remove a package (multi: /remove 1,3)\n' +
         '/pause &lt;number or tracking&gt; — Pause tracking\n' +
         '/resume &lt;number or tracking&gt; — Resume tracking\n' +
         '/check — Force check now\n\n' +
@@ -584,7 +605,7 @@ export function startBot() {
   bot.command('remove', async (ctx) => {
     const args = ctx.message.text.replace(/^\/remove\s*/, '').trim();
     if (!args) {
-      await ctx.reply('Usage: /remove &lt;number or tracking_number&gt;');
+      await ctx.reply('Usage: /remove &lt;number or tracking_number&gt;\nMultiple: /remove 1,3 or /remove 2 3');
       return;
     }
     await handleRemove(ctx, args);
@@ -631,7 +652,7 @@ export function startBot() {
         '/add &lt;tracking&gt; [title] — Add a package\n' +
         '/edit [number or tracking] — Change a package title\n' +
         '/status &lt;number or tracking&gt; — Get detailed status\n' +
-        '/remove &lt;number or tracking&gt; — Remove a package\n' +
+        '/remove &lt;number or tracking&gt; — Remove a package (multi: /remove 1,3)\n' +
         '/pause &lt;number or tracking&gt; — Pause tracking\n' +
         '/resume &lt;number or tracking&gt; — Resume tracking\n' +
         '/check — Force check now\n\n' +
