@@ -9,15 +9,35 @@ async function scrapePage(
   page: import('puppeteer').Page,
   trackingNumber: string
 ): Promise<import('./usps').TrackingResult> {
-  await page.goto(`${TRACK_URL}/?trknbr=${encodeURIComponent(trackingNumber)}`, {
-    waitUntil: 'networkidle2',
+  const url = `${TRACK_URL}/?trknbr=${encodeURIComponent(trackingNumber)}&locale=en_US`;
+  await page.goto(url, {
+    waitUntil: 'domcontentloaded',
     timeout: 30000,
   });
 
-  await new Promise((r) => setTimeout(r, 4000));
+  // Wait for tracking content to render (FedEx is JS-heavy)
+  await new Promise((r) => setTimeout(r, 6000));
+
+  // Also wait for key elements
+  try {
+    await page.waitForFunction(
+      () => document.body.innerText.length > 100,
+      { timeout: 5000 }
+    );
+  } catch {
+    // continue even if timeout
+  }
 
   const data = await page.evaluate(() => {
-    const body = document.body.innerText;
+    const body = document.body;
+    const innerText = body.innerText || '';
+    const textContent = body.textContent || '';
+    const bodyText = innerText.length > textContent.length ? innerText : textContent;
+
+    // Detect if we're on a challenge/access denied page
+    if (/access denied|blocked|permission denied|captcha|verify you are human|unusual traffic/i.test(bodyText)) {
+      return { description: '', events: [], blocked: true };
+    }
 
     const descriptions = [
       'Your package has been delivered',
@@ -44,7 +64,7 @@ async function scrapePage(
     ];
     let description = '';
     for (const prefix of descriptions) {
-      const descMatch = body.match(
+      const descMatch = bodyText.match(
         new RegExp(
           `(${prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[\\s\\S]*?\\.)`,
           'i'
@@ -57,7 +77,7 @@ async function scrapePage(
     }
 
     if (!description) {
-      const lines = body.split('\n').filter(Boolean);
+      const lines = bodyText.split('\n').map((l: string) => l.trim()).filter(Boolean);
       for (let i = 0; i < Math.min(lines.length, 20); i++) {
         if (
           /delivered|in transit|out for delivery|picked up|exception|clearance delay/i.test(
@@ -97,12 +117,12 @@ async function scrapePage(
 
     const dateRe =
       /^(?:[A-Z][a-z]{2,8}\s+)?(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),\s+(\d{4})/i;
-    const dateRe2 = /^\d{1,2}\/\d{1,2}\/\d{4}/;
+    const dateRe2 = /^\d{1,2}\/\d{1,2}\/\d{2,4}/;
     const timeRe = /\d{1,2}:\d{2}\s*(?:AM|PM|am|pm)/;
 
-    const lines = body
+    const lines = bodyText
       .split('\n')
-      .map((l) => l.trim())
+      .map((l: string) => l.trim())
       .filter(Boolean);
 
     const events: Array<{
@@ -239,7 +259,13 @@ export async function checkFedExTracking(
 
   const browser = await puppeteer.launch({
     headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-blink-features=AutomationControlled',
+      '--disable-features=IsolateOrigins,site-per-process',
+    ],
   });
 
   const results: import('./usps').TrackingResult[] = [];
