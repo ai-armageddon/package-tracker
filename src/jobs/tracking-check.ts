@@ -5,6 +5,8 @@ import { sendBatchNotification } from '@/lib/services/telegram';
 import type { Carrier } from '@/lib/services/carriers';
 
 const CHECK_INTERVAL = Number(process.env.CHECK_INTERVAL_MINUTES) || 15;
+const RUN_INITIAL_CHECK = process.env.RUN_INITIAL_TRACKING_CHECK === 'true';
+let schedulerStarted = false;
 
 function shouldCheck(intervalMinutes: number): boolean {
   const now = new Date();
@@ -154,10 +156,8 @@ export async function runTrackingCheck() {
     FedEx: activeItems.filter((i) => i.carrier === 'FedEx'),
   };
 
-  const [uspsResult, fedExResult] = await Promise.all([
-    checkCarrier('USPS', byCarrier.USPS),
-    checkCarrier('FedEx', byCarrier.FedEx),
-  ]);
+  const uspsResult = await checkCarrier('USPS', byCarrier.USPS);
+  const fedExResult = await checkCarrier('FedEx', byCarrier.FedEx);
 
   const allUpdates = [...uspsResult.updates, ...fedExResult.updates];
   const allDeletes = [...uspsResult.toDelete, ...fedExResult.toDelete];
@@ -176,6 +176,13 @@ export async function runTrackingCheck() {
 }
 
 export function startScheduler() {
+  if (schedulerStarted) {
+    console.log('Tracking check scheduler already running.');
+    return;
+  }
+
+  schedulerStarted = true;
+
   console.log(
     `Tracking check scheduler running every minute (fires at ${CHECK_INTERVAL}-minute intervals).`
   );
@@ -187,6 +194,8 @@ export function startScheduler() {
     );
   }, 60_000);
 
-  console.log('Running initial check...');
-  runTrackingCheck().catch((err) => console.error('Initial check error:', err));
+  if (RUN_INITIAL_CHECK) {
+    console.log('Running initial check...');
+    runTrackingCheck().catch((err) => console.error('Initial check error:', err));
+  }
 }

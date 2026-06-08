@@ -76,6 +76,7 @@ export default function HomePage() {
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState('');
   const [checking, setChecking] = useState(false);
+  const [checkingIds, setCheckingIds] = useState<Set<string>>(new Set());
   const [editId, setEditId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState({ title: '', note: '' });
   const [mounted, setMounted] = useState(false);
@@ -157,9 +158,12 @@ export default function HomePage() {
 
   async function handleCheck() {
     setChecking(true);
+    const activeIds = new Set(items.filter((i) => i.active).map((i) => i.id));
+    setCheckingIds(activeIds);
     await fetch('/api/check', { method: 'POST' });
     setTimeout(() => {
       setChecking(false);
+      setCheckingIds(new Set());
       fetchItems();
     }, 2000);
   }
@@ -193,7 +197,7 @@ export default function HomePage() {
             />
             <div className="sm:col-span-4">
               {form.trackingNumber && (
-                <div className="flex items-center gap-3 animate-fade-in -ml-[5%]">
+                <div className="flex items-center gap-3 animate-fade-in flex-wrap">
                   <span className="text-sm text-gray-400">Carrier:</span>
                   <select
                     value={form.carrier}
@@ -270,12 +274,14 @@ export default function HomePage() {
         </p>
       ) : (
         <div className="space-y-3">
-          {items.map((item, i) => (
+          {items.map((item, i) => {
+            const isChecked = checkingIds.has(item.id);
+            return (
             <div
               key={item.id}
               className={`bg-gray-900 border border-l-2 rounded-lg p-5 transition-all duration-300 hover:border-gray-500 ${
                 item.active ? 'border-gray-700' : 'border-gray-800 opacity-50'
-              } ${carrierCardStyle(item.carrier)} ${carrierGradientAnim(item.carrier)}`}
+              } ${isChecked ? 'ring-1 ring-green-500/30 border-green-600/40' : ''} ${carrierCardStyle(item.carrier)} ${carrierGradientAnim(item.carrier)}`}
               style={{
                 backgroundSize: '200% 100%',
                 opacity: mounted ? (item.active ? 1 : 0.5) : 0,
@@ -377,6 +383,12 @@ export default function HomePage() {
                           })}
                         </p>
                       )}
+                      {isChecked && (
+                        <div className="flex items-center gap-2 mt-2 text-green-400 animate-fade-in">
+                          <span className="w-3 h-3 border-2 border-green-400/30 border-t-green-400 rounded-full animate-spin" />
+                          <span className="text-xs font-medium">Checking...</span>
+                        </div>
+                      )}
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
                       <Link
@@ -412,7 +424,8 @@ export default function HomePage() {
                 </>
               )}
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

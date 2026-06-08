@@ -617,7 +617,42 @@ async function handlePause(ctx: Context, ref: string, pause: boolean) {
   await ctx.reply(`⏸️ <b>${escapeHtml(label)}</b> ${action}.`, { parse_mode: 'HTML' });
 }
 
-async function handleCheckNow(ctx: Context) {
+async function handleCheckNow(ctx: Context, ref?: string) {
+  if (ref) {
+    const resolved = await resolveTrackingRef(ref);
+    if ('error' in resolved) {
+      const msg = resolved.suggestion
+        ? `${resolved.error}. ${resolved.suggestion}`
+        : resolved.error;
+      await ctx.reply(msg, { parse_mode: 'HTML' });
+      return;
+    }
+
+    const item = resolved.item!;
+    const label = item.title || item.trackingNumber;
+    await ctx.reply(`🔍 Checking <b>${escapeHtml(label)}</b>...`, { parse_mode: 'HTML' });
+
+    try {
+      const summary = await fetchAndSaveTracking(item.trackingNumber, item.carrier as Carrier);
+      const refreshed = await prisma.trackingItem.findUnique({ where: { id: item.id } });
+      if (!refreshed) {
+        await ctx.reply('Package not found after check.');
+        return;
+      }
+      const badge = carrierBadge(refreshed.carrier);
+      const status = refreshed.lastStatus || 'No status';
+      const loc = refreshed.lastLocation ? `\n📍 ${escapeHtml(refreshed.lastLocation)}` : '';
+      const detail = refreshed.lastDetail ? `\n📋 ${escapeHtml(refreshed.lastDetail)}` : '';
+      await ctx.reply(
+        `${badge} <b>${escapeHtml(refreshed.title || refreshed.trackingNumber)}</b>\n📬 ${escapeHtml(status)}${detail}${loc}`,
+        { parse_mode: 'HTML' }
+      );
+    } catch (err: any) {
+      await ctx.reply(`Error checking package: ${err.message}`);
+    }
+    return;
+  }
+
   await ctx.reply('🔍 Checking all packages now...');
   try {
     const { runTrackingCheck } = await import('@/jobs/tracking-check');
@@ -655,7 +690,7 @@ export function startBot() {
         '/remove &lt;number or tracking&gt; — Remove a package (multi: /remove 1,3)\n' +
         '/pause &lt;number or tracking&gt; — Pause tracking\n' +
         '/resume &lt;number or tracking&gt; — Resume tracking\n' +
-        '/check — Force check now\n\n' +
+        '/check [number or tracking] — Force check (all or one)\n\n' +
         'Tip: Use numbers from /list, e.g. /status 1',
       { parse_mode: 'HTML' },
     );
@@ -709,7 +744,10 @@ export function startBot() {
     await handlePause(ctx, args, false);
   });
 
-  bot.command('check', (ctx) => handleCheckNow(ctx));
+  bot.command('check', async (ctx) => {
+    const args = ctx.message.text.replace(/^\/check\s*/, '').trim();
+    await handleCheckNow(ctx, args || undefined);
+  });
 
   bot.command('edit', async (ctx) => {
     const args = ctx.message.text.replace(/^\/edit\s*/, '').trim();
@@ -727,7 +765,7 @@ export function startBot() {
         '/remove &lt;number or tracking&gt; — Remove a package (multi: /remove 1,3)\n' +
         '/pause &lt;number or tracking&gt; — Pause tracking\n' +
         '/resume &lt;number or tracking&gt; — Resume tracking\n' +
-        '/check — Force check now\n\n' +
+        '/check [number or tracking] — Force check (all or one)\n\n' +
         'Tip: Use numbers from /list, e.g. /status 1',
     ),
   );
