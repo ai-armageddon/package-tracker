@@ -3,8 +3,12 @@ import { execSync } from 'child_process';
 import './globals.css';
 
 function getVersion() {
-  const n = parseInt(execSync('git rev-list --count HEAD').toString().trim(), 10);
-  return `v${Math.floor(n / 100)}.${Math.floor((n % 100) / 10)}.${n % 10}`;
+  try {
+    const n = parseInt(execSync('git rev-list --count HEAD').toString().trim(), 10);
+    return `v${Math.floor(n / 100)}.${Math.floor((n % 100) / 10)}.${n % 10}`;
+  } catch {
+    return 'v1.0.0';
+  }
 }
 
 export const metadata: Metadata = {

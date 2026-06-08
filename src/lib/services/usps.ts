@@ -60,7 +60,10 @@ async function scrapePage(
     const lines = section.split('\n').map((l) => l.trim()).filter(Boolean);
 
     const dateRe = /^(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),\s+(\d{4})\s+(\d{1,2}:\d{2}\s*(?:AM|PM))$/i;
-    const capsRe = /^[A-Z][A-Z\s,.-]+$/;
+    const dateReShort = /^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)\s+(\d{1,2}),?\s+(\d{4})/i;
+    const timeRe = /\d{1,2}:\d{2}\s*(?:AM|PM)/i;
+    const locRe = /^[A-Z][A-Za-z\s,.'\-]+(?:[A-Z]{2})?(?:\s+\d{5}(?:-\d+)?)?(?:\s+[A-Z][A-Za-z\s,.'\-]+)*$/;
+    const isDateLine = (line: string) => dateRe.test(line) || dateReShort.test(line);
 
     const knownStatuses = new Set([
       'Delivered', 'Out for Delivery', 'Preparing for Delivery',
@@ -71,35 +74,51 @@ async function scrapePage(
       'USPS in possession of item', 'USPS picked up item',
       'Shipping Label Created, USPS Awaiting Item',
       'Shipping Label Created', 'Available for Pickup',
-      'On the Way',
+      'On the Way', 'Delivered, Individual Picked Up at Post Office',
+      'Delivered, Left with Individual', 'Delivered, PO Box',
+      'Delivered, Parcel Locker', 'Delivered, Front Desk/Reception',
+      'Forwarded', 'Processing Exception', 'Arrived at Hub',
+      'Departed USPS Regional Facility', 'Arrived at USPS Regional Facility',
+      'Processed through USPS Facility', 'Missent',
     ]);
 
     const events: Array<{ status: string; detail: string; location: string; date: string; time: string }> = [];
 
-    for (let i = 0; i < lines.length; i++) {
+    let i = 0;
+    while (i < lines.length) {
       const dateMatch = lines[i].match(dateRe);
-      if (!dateMatch) continue;
+      if (!dateMatch) { i++; continue; }
 
       const date = dateMatch[1] + ' ' + dateMatch[2] + ', ' + dateMatch[3];
       const time = dateMatch[4];
 
       let status = '';
       let location = '';
+      const locParts: string[] = [];
 
-      const prev = i >= 1 ? lines[i - 1] : '';
-      const prevPrev = i >= 2 ? lines[i - 2] : '';
-
-      if (capsRe.test(prev) && knownStatuses.has(prevPrev)) {
-        status = prevPrev;
-        location = prev;
-      } else if (knownStatuses.has(prev)) {
-        status = prev;
-        location = '';
-      } else {
-        continue;
+      for (let j = i - 1; j >= 0; j--) {
+        const line = lines[j];
+        if (isDateLine(line)) break;
+        if (knownStatuses.has(line)) {
+          status = line;
+          break;
+        }
+        if (locRe.test(line) && !/\d{1,2}:\d{2}/.test(line)) {
+          locParts.unshift(line);
+        }
       }
 
-      events.push({ status, detail: status, location, date, time });
+      location = locParts.join(', ');
+
+      if (!status) continue;
+
+      const detail = status + (location ? ` — ${location}` : '');
+      events.push({ status, detail, location, date, time });
+      i++;
+    }
+
+    if (events.length > 0 && description) {
+      events[0].detail = description;
     }
 
     // Fallback: extract event from description if no timeline events found
@@ -107,7 +126,6 @@ async function scrapePage(
       const locMatch = description.match(/(?:in|at)\s+([A-Z][A-Z\s,]+(?:[A-Z]{2})?(?:\s+\d{5})?)(?:\.|$)/i);
       const loc = locMatch ? locMatch[1].trim() : '';
 
-      // Try "Month DD, YYYY HH:MM AM/PM" or "HH:MM am/pm on Month DD, YYYY"
       let d = '';
       let t = '';
       const fmt1 = description.match(
@@ -128,7 +146,7 @@ async function scrapePage(
       if (d) {
         const statusMatch = description.match(/^(USPS is now in possession|Your item arrived|Your item departed|Your item was delivered|Your item is)/i);
         const st = statusMatch ? statusMatch[0] : 'Accepted';
-        events.push({ status: st, detail: st, location: loc, date: d, time: t });
+        events.push({ status: st, detail: description, location: loc, date: d, time: t });
       }
     }
 

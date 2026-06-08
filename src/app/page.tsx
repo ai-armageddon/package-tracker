@@ -168,6 +168,19 @@ export default function HomePage() {
     }, 2000);
   }
 
+  async function handleCheckItem(id: string) {
+    setCheckingIds((prev) => new Set(prev).add(id));
+    await fetch(`/api/trackings/${id}/check`, { method: 'POST' });
+    setTimeout(() => {
+      setCheckingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+      fetchItems();
+    }, 1000);
+  }
+
   return (
     <div className="space-y-8">
       <div className={`bg-gray-900 border border-gray-800 rounded-lg p-6 transition-all duration-500 ${mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'}`}>
@@ -402,6 +415,23 @@ export default function HomePage() {
                         className="text-xs text-gray-400 hover:text-gray-300 transition-colors"
                       >
                         Edit
+                      </button>
+                      <button
+                        onClick={() => handleCheckItem(item.id)}
+                        disabled={isChecked}
+                        className={`text-xs transition-colors ${
+                          isChecked
+                            ? 'text-green-400'
+                            : 'text-green-500 hover:text-green-400'
+                        }`}
+                      >
+                        {isChecked ? (
+                          <span className="inline-flex items-center gap-1">
+                            <span className="w-2.5 h-2.5 border-2 border-green-400/30 border-t-green-400 rounded-full animate-spin" />
+                          </span>
+                        ) : (
+                          'Check'
+                        )}
                       </button>
                       <button
                         onClick={() => handleToggle(item)}
