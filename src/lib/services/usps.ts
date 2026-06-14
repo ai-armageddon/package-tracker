@@ -30,27 +30,63 @@ async function scrapePage(
 
   await new Promise((r) => setTimeout(r, 3000));
 
-  const data = await page.evaluate(() => {
+  const data = await page.evaluate((trackingNumber) => {
     const body = document.body.innerText;
+    const allLines = body.split('\n').map((l) => l.trim()).filter(Boolean);
 
+    const latestUpdateStopRe =
+      /^(Get More Out of USPS Tracking:?|USPS Tracking Plus(?:®)?|Text & Email Updates|Product Information|See Less|Track Another Package|What Do USPS Tracking Statuses Mean\??|Need More Help\??|FAQs)$/i;
+    const latestUpdateIndex = allLines.findIndex((line) =>
+      /^Latest Update$/i.test(line)
+    );
     const descriptions = [
       'USPS is now in possession of your item',
       'Your item arrived at',
+      'Your item arrived at a shipping partner facility',
       'Your item was delivered',
       'Your item departed',
+      'Your item departed a shipping partner facility',
       'Your item is',
       'Status information is',
     ];
     let description = '';
-    for (const prefix of descriptions) {
-      const descMatch = body.match(new RegExp(`(${prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[\\s\\S]*?\\.)`, 'i'));
-      if (descMatch) {
-        description = descMatch[0].trim();
-        break;
+
+    if (latestUpdateIndex >= 0) {
+      const latestUpdateLines: string[] = [];
+      for (let k = latestUpdateIndex + 1; k < allLines.length; k++) {
+        const line = allLines[k];
+        if (
+          line === trackingNumber ||
+          /^Tracking Number:?$/i.test(line) ||
+          /^Copy Add to Informed Delivery$/i.test(line)
+        ) {
+          continue;
+        }
+        if (latestUpdateStopRe.test(line)) break;
+        latestUpdateLines.push(line);
       }
+      description = latestUpdateLines.join(' ').trim();
     }
 
-    const startIdx = body.indexOf('On the Way\n');
+    for (const prefix of descriptions) {
+      if (description) break;
+      const descMatch = body.match(new RegExp(`(${prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[\\s\\S]*?\\.)`, 'i'));
+      if (descMatch) description = descMatch[0].trim();
+    }
+
+    const startMarkers = [
+      'On the Way\n',
+      'USPS Awaiting Item\n',
+      'Moving Through Network\n',
+      'Out for Delivery\n',
+      'Delivered\n',
+      'Latest Update\n',
+    ];
+    const startIdx = startMarkers.reduce((earliest, marker) => {
+      const idx = body.indexOf(marker);
+      if (idx === -1) return earliest;
+      return earliest === -1 ? idx : Math.min(earliest, idx);
+    }, -1);
     const endIdx = body.indexOf('\nWhat Do USPS Tracking Statuses Mean');
     const section =
       startIdx >= 0 && endIdx >= 0
@@ -80,7 +116,27 @@ async function scrapePage(
       'Forwarded', 'Processing Exception', 'Arrived at Hub',
       'Departed USPS Regional Facility', 'Arrived at USPS Regional Facility',
       'Processed through USPS Facility', 'Missent',
+      'Moving Through Network', 'In Transit, Arriving Late',
+      'Pre-Shipment Info Sent to USPS, USPS Awaiting Item',
+      'USPS Awaiting Item', 'Arrived Shipping Partner Facility',
+      'Arrived Shipping Partner Facility, USPS Awaiting Item',
+      'Departed Shipping Partner Facility',
+      'Departed Shipping Partner Facility, USPS Awaiting Item',
+      'Picked up by Shipping Partner', 'Picked Up by Shipping Partner',
     ]);
+    const knownStatusLookup = new Map(
+      Array.from(knownStatuses).map((status) => [status.toLowerCase(), status])
+    );
+    const shippingPartnerStatusRe =
+      /^(?:Arrived|Departed) Shipping Partner Facility(?:,\s*USPS Awaiting Item)?$/i;
+    const getStatusLine = (line: string) => {
+      const knownStatus = knownStatusLookup.get(line.toLowerCase());
+      if (knownStatus) return line;
+      if (shippingPartnerStatusRe.test(line)) return line;
+      if (/^Picked up by Shipping Partner$/i.test(line)) return line;
+      if (/^USPS Awaiting Item$/i.test(line)) return line;
+      return '';
+    };
 
     const events: Array<{ status: string; detail: string; location: string; date: string; time: string }> = [];
 
@@ -99,8 +155,9 @@ async function scrapePage(
       for (let j = i - 1; j >= 0; j--) {
         const line = lines[j];
         if (isDateLine(line)) break;
-        if (knownStatuses.has(line)) {
-          status = line;
+        const statusLine = getStatusLine(line);
+        if (statusLine) {
+          status = statusLine;
           break;
         }
         if (locRe.test(line) && !/\d{1,2}:\d{2}/.test(line)) {
@@ -144,14 +201,23 @@ async function scrapePage(
       }
 
       if (d) {
-        const statusMatch = description.match(/^(USPS is now in possession|Your item arrived|Your item departed|Your item was delivered|Your item is)/i);
-        const st = statusMatch ? statusMatch[0] : 'Accepted';
+        let st = 'Accepted';
+        if (/departed a shipping partner facility/i.test(description)) {
+          st = 'Departed Shipping Partner Facility';
+        } else if (/arrived at a shipping partner facility/i.test(description)) {
+          st = 'Arrived Shipping Partner Facility';
+        } else if (/picked up by (?:a )?shipping partner/i.test(description)) {
+          st = 'Picked up by Shipping Partner';
+        } else {
+          const statusMatch = description.match(/^(USPS is now in possession|Your item arrived|Your item departed|Your item was delivered|Your item is)/i);
+          st = statusMatch ? statusMatch[0] : st;
+        }
         events.push({ status: st, detail: description, location: loc, date: d, time: t });
       }
     }
 
     return { description, events };
-  });
+  }, trackingNumber);
 
   return {
     trackingNumber,
