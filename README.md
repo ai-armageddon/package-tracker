@@ -78,10 +78,13 @@ Use numbers from `/list` (e.g. `/status 1`) or partial names — fuzzy matching 
 | `RUN_INITIAL_TRACKING_CHECK` | Set to `true` to check packages immediately on app startup; defaults to `false` |
 | `FEDEX_BROWSER_MODE` | `headless` for server-safe checks, or `headful` for local debugging/virtual displays |
 | `FEDEX_HEADFUL_FALLBACK` | Set to `true` to retry suspicious headless FedEx responses in visible-browser mode |
+| `UPS_CHROME_PATH` | Optional path to an installed Chrome binary; UPS auto-detects common local Chrome paths |
+| `UPS_BROWSER_MODE` | `headless` by default, or `headful` for local UPS debugging |
+| `UPS_BROWSER_USER_DATA_DIR` | Optional Chrome profile directory for UPS checks; blank uses a temporary profile |
 
 ## How Tracking Works
 
-No external API keys needed. The app uses Puppeteer with a stealth plugin to render carrier tracking pages like a real browser, then extracts status, location, and timeline events from the page. A 3-second cooldown between requests avoids triggering bot detection. FedEx headless checks are server-safe, but FedEx/Akamai may block them; local debugging can use `FEDEX_BROWSER_MODE=headful`, or a server can run headful Chromium under a virtual display such as Xvfb. Each check opens Chrome once per carrier, processes all packages, then closes — keeping resource usage low.
+No external API keys needed. The app uses Puppeteer with a stealth plugin to render carrier tracking pages like a real browser, then extracts status, location, and timeline events from the page. A 3-second cooldown between requests avoids triggering bot detection. FedEx headless checks are server-safe, but FedEx/Akamai may block them; local debugging can use `FEDEX_BROWSER_MODE=headful`, or a server can run headful Chromium under a virtual display such as Xvfb. UPS checks prefer an installed Chrome binary because UPS can reject bundled automation Chromium. Each check opens Chrome once per carrier, processes all packages, then closes — keeping resource usage low.
 
 ## Supported Carriers
 

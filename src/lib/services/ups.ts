@@ -1,5 +1,8 @@
 import puppeteer from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import type { TrackingEvent, TrackingResult } from './usps';
 
 puppeteer.use(StealthPlugin());
@@ -7,6 +10,31 @@ puppeteer.use(StealthPlugin());
 const TRACK_URL = 'https://www.ups.com/track';
 const USER_AGENT =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36';
+
+const CMS_DAYS: Record<string, string> = {
+  mon: 'Monday',
+  tue: 'Tuesday',
+  wed: 'Wednesday',
+  thu: 'Thursday',
+  fri: 'Friday',
+  sat: 'Saturday',
+  sun: 'Sunday',
+};
+
+const CMS_MONTHS: Record<string, string> = {
+  jan: 'January',
+  feb: 'February',
+  mar: 'March',
+  apr: 'April',
+  may: 'May',
+  jun: 'June',
+  jul: 'July',
+  aug: 'August',
+  sep: 'September',
+  oct: 'October',
+  nov: 'November',
+  dec: 'December',
+};
 
 type JsonRecord = Record<string, unknown>;
 
@@ -20,6 +48,44 @@ function normalizeWhitespace(value: string): string {
 
 function normalizeTrackingNumber(value: string): string {
   return value.replace(/\s+/g, '').toUpperCase();
+}
+
+function getCmsKeyName(value: string): string {
+  return value.split('.').pop()?.toLowerCase() || value.toLowerCase();
+}
+
+function formatCmsTime(value: string): string {
+  const key = getCmsKeyName(value);
+  const byTime = key.match(/^by(\d{1,2})(am|pm)$/i);
+  if (byTime) {
+    const [, hour, meridiem] = byTime;
+    return `by ${hour}:00 ${meridiem.toUpperCase().replace('AM', 'A.M.').replace('PM', 'P.M.')}`;
+  }
+
+  if (/endofday/i.test(key)) return 'by end of day';
+  return normalizeWhitespace(value);
+}
+
+function buildEstimatedDelivery(detail: JsonRecord): string {
+  const scheduled = detail.scheduledDeliveryDateDetail;
+  const dayKey = getDeepString(detail, ['scheduledDeliveryDayCMSKey']);
+  const timeKey = getDeepString(detail, ['packageStatusTime']);
+
+  if (!isRecord(scheduled)) return '';
+
+  const dayName = dayKey ? CMS_DAYS[getCmsKeyName(dayKey)] : '';
+  const monthKey = getOwnString(scheduled, ['monthCMSKey']);
+  const monthName = monthKey ? CMS_MONTHS[getCmsKeyName(monthKey)] : '';
+  const dayNum = getOwnString(scheduled, ['dayNum']);
+  const timeText = timeKey ? formatCmsTime(timeKey) : '';
+  const dateText = [dayName, [monthName, dayNum].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+
+  return [dateText, timeText].filter(Boolean).join(' ');
+}
+
+function withEstimatedDelivery(detail: string, estimatedDelivery: string): string {
+  if (!estimatedDelivery || /estimated delivery/i.test(detail)) return detail;
+  return `${detail} — Estimated delivery ${estimatedDelivery}`;
 }
 
 function isRecord(value: unknown): value is JsonRecord {
@@ -146,7 +212,7 @@ function getLocation(value: unknown): string {
 
 function normalizeTime(value: string): string {
   return normalizeWhitespace(value)
-    .replace(/\b([AP])\.?M\.?\b/gi, (_, ap) => `${ap.toUpperCase()}M`)
+    .replace(/\b([AP])\.?\s?M\.?/gi, (_, ap) => `${ap.toUpperCase()}M`)
     .toUpperCase();
 }
 
@@ -216,7 +282,7 @@ function parseActivities(detail: JsonRecord): TrackingEvent[] {
   for (const activityArray of activityArrays) pushArrayValue(activities, activityArray);
 
   return activities
-    .map((activity) => {
+    .map((activity): TrackingEvent | null => {
       const status =
         getDeepString(activity, [
           'activityScan',
@@ -226,7 +292,7 @@ function parseActivities(detail: JsonRecord): TrackingEvent[] {
           'packageStatus',
           'packageStatusDescription',
           'description',
-        ]) || 'UPS update';
+        ]) || '';
       const detailText =
         getDeepString(activity, [
           'activityDescription',
@@ -239,15 +305,21 @@ function parseActivities(detail: JsonRecord): TrackingEvent[] {
       const location = getLocation(activity);
       const { date, time } = extractDateTime(activity);
 
+      if (activity.isFuture === true && !date && !time && !location) {
+        return null;
+      }
+
+      if (!status && !detailText) return null;
+
       return {
-        status,
+        status: status || detailText,
         detail: detailText,
         location,
         date,
         time,
       };
     })
-    .filter((event) => event.status || event.detail);
+    .filter((event): event is TrackingEvent => !!event && (!!event.status || !!event.detail));
 }
 
 function parseJsonResponse(
@@ -268,6 +340,7 @@ function parseJsonResponse(
   }
 
   const events = parseActivities(detail);
+  const estimatedDelivery = buildEstimatedDelivery(detail);
   const status =
     getDeepString(detail, [
       'packageStatusDescription',
@@ -279,15 +352,52 @@ function parseJsonResponse(
     ]) || errorText;
   const location = getLocation(detail);
   const { date, time } = extractDateTime(detail);
+  const currentStatus = status || getDeepString(detail, ['currentMilestone', 'name']);
+  const currentLocation = getLocation(detail.currentMilestone);
+  const currentDateTime = isRecord(detail.currentMilestone)
+    ? extractDateTime(detail.currentMilestone)
+    : { date, time };
 
   if (events.length === 0 && status && !/tracking number|shipment progress|details/i.test(status)) {
     events.push({
       status,
-      detail: status,
+      detail: withEstimatedDelivery(status, estimatedDelivery),
       location,
       date,
       time,
     });
+  }
+
+  if (currentStatus && (currentLocation || currentDateTime.date || currentDateTime.time)) {
+    const currentEvent = {
+      status: currentStatus,
+      detail: withEstimatedDelivery(currentStatus, estimatedDelivery),
+      location: currentLocation,
+      date: currentDateTime.date,
+      time: currentDateTime.time,
+    };
+    const hasCurrentEvent = events.some(
+      (event) =>
+        event.status === currentEvent.status &&
+        event.location === currentEvent.location &&
+        event.date === currentEvent.date &&
+        event.time === currentEvent.time
+    );
+
+    if (!hasCurrentEvent) events.unshift(currentEvent);
+  }
+
+  const currentIndex = events.findIndex(
+    (event) =>
+      (!!currentStatus && event.status.toLowerCase() === currentStatus.toLowerCase()) ||
+      (!!currentLocation && event.location === currentLocation) ||
+      (!!currentDateTime.date && event.date === currentDateTime.date && event.time === currentDateTime.time)
+  );
+  if (currentIndex >= 0) {
+    events[currentIndex] = {
+      ...events[currentIndex],
+      detail: withEstimatedDelivery(events[currentIndex].detail || events[currentIndex].status, estimatedDelivery),
+    };
   }
 
   const deduped = events.filter(
@@ -324,6 +434,31 @@ function isLikelyStatus(line: string): boolean {
 
 function isLikelyLocation(line: string): boolean {
   return /^[A-Z][A-Z .'-]+,\s*[A-Z]{2}(?:\s+\d{5})?(?:,\s*[A-Z]{2})?$/i.test(line);
+}
+
+function getLineAfterLabel(lines: string[], label: RegExp): string {
+  const index = lines.findIndex((line) => label.test(line));
+  if (index === -1) return '';
+
+  for (let scan = index + 1; scan < lines.length; scan++) {
+    const candidate = lines[scan];
+    if (candidate && !/^(check|close|completed|active|inactive)$/i.test(candidate)) return candidate;
+  }
+
+  return '';
+}
+
+function parseLastLocationLine(line: string): { location: string; date: string; time: string } | null {
+  const match = line.match(
+    /^(.+?),\s*(\d{1,2}\/\d{1,2}\/\d{4}),\s*(\d{1,2}:\d{2}\s*(?:A\.?M\.?|P\.?M\.?|AM|PM))$/i
+  );
+  if (!match) return null;
+
+  return {
+    location: normalizeWhitespace(match[1]),
+    date: match[2],
+    time: normalizeTime(match[3]),
+  };
 }
 
 function parseRenderedText(text: string, trackingNumber: string): TrackingResult {
@@ -376,6 +511,9 @@ function parseRenderedText(text: string, trackingNumber: string): TrackingResult
       break;
     }
   }
+
+  const estimatedDelivery = getLineAfterLabel(lines, /^estimated delivery$/i);
+  const lastLocation = parseLastLocationLine(getLineAfterLabel(lines, /^last location:?$/i));
 
   for (let index = 0; index < lines.length; index++) {
     const line = lines[index];
@@ -451,11 +589,40 @@ function parseRenderedText(text: string, trackingNumber: string): TrackingResult
   if (deduped.length === 0 && summary) {
     deduped.push({
       status: summary,
-      detail: summary,
+      detail: withEstimatedDelivery(summary, estimatedDelivery),
       location: '',
       date: '',
       time: '',
     });
+  }
+
+  if (lastLocation && summary) {
+    const lastLocationEvent: TrackingEvent = {
+      status: summary,
+      detail: withEstimatedDelivery(summary, estimatedDelivery),
+      location: lastLocation.location,
+      date: lastLocation.date,
+      time: lastLocation.time,
+    };
+    const existingIndex = deduped.findIndex(
+      (event) =>
+        event.status === lastLocationEvent.status &&
+        event.location === lastLocationEvent.location &&
+        event.date === lastLocationEvent.date &&
+        event.time === lastLocationEvent.time
+    );
+
+    if (existingIndex === -1) {
+      deduped.unshift(lastLocationEvent);
+    } else {
+      deduped[existingIndex] = {
+        ...deduped[existingIndex],
+        detail: withEstimatedDelivery(
+          deduped[existingIndex].detail || deduped[existingIndex].status,
+          estimatedDelivery
+        ),
+      };
+    }
   }
 
   return {
@@ -567,7 +734,7 @@ async function scrapePage(
       timeout: 45000,
     });
 
-    await delay(7000);
+    await waitForUpsResult(page, jsonPayloads, trackingNumber);
     await clickVisibleByText(page, /^(allow all|accept all cookies|essential cookies only)$/i);
     await clickVisibleByText(page, /^(view all shipping details|view detailed progress|show details|view details)$/i);
 
@@ -577,7 +744,7 @@ async function scrapePage(
     }
 
     const submitted = await submitTrackingFormIfNeeded(page, trackingNumber);
-    if (submitted) await delay(7000);
+    if (submitted) await waitForUpsResult(page, jsonPayloads, trackingNumber);
     await clickVisibleByText(page, /^(view all shipping details|view detailed progress|show details|view details)$/i);
 
     for (const payload of jsonPayloads) {
@@ -599,13 +766,60 @@ async function scrapePage(
   }
 }
 
+async function waitForUpsResult(
+  page: import('puppeteer').Page,
+  jsonPayloads: unknown[],
+  trackingNumber: string,
+  timeoutMs = 18000
+) {
+  const started = Date.now();
+  const normalized = normalizeTrackingNumber(trackingNumber);
+
+  while (Date.now() - started < timeoutMs) {
+    if (jsonPayloads.some((payload) => parseJsonResponse(payload, trackingNumber)?.events.length)) {
+      return;
+    }
+
+    const hasResult = await page
+      .evaluate((tn) => {
+        const text = document.body.innerText || '';
+        return text.includes('Tracking Details') && text.toUpperCase().includes(tn);
+      }, normalized)
+      .catch(() => false);
+
+    if (hasResult) return;
+    await delay(500);
+  }
+}
+
+function findChromeExecutable(): string | undefined {
+  const configured = process.env.UPS_CHROME_PATH || process.env.PUPPETEER_EXECUTABLE_PATH;
+  const candidates = [
+    configured,
+    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+    '/Applications/Chromium.app/Contents/MacOS/Chromium',
+    '/usr/bin/google-chrome',
+    '/usr/bin/google-chrome-stable',
+    '/usr/bin/chromium',
+    '/usr/bin/chromium-browser',
+    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+  ].filter(Boolean) as string[];
+
+  return candidates.find((candidate) => fs.existsSync(candidate));
+}
+
 export async function checkUpsTracking(
   trackingNumbers: string[]
 ): Promise<TrackingResult[]> {
   if (trackingNumbers.length === 0) return [];
 
+  const chromeExecutable = findChromeExecutable();
+  const tempProfileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'package-tracker-ups-'));
   const browser = await puppeteer.launch({
-    headless: true,
+    executablePath: chromeExecutable,
+    headless: process.env.UPS_BROWSER_MODE === 'headful' ? false : true,
+    userDataDir: process.env.UPS_BROWSER_USER_DATA_DIR || tempProfileDir,
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
@@ -623,7 +837,9 @@ export async function checkUpsTracking(
       const page = await browser.newPage();
       try {
         await page.setViewport({ width: 1365, height: 900 });
-        await page.setUserAgent(USER_AGENT);
+        if (!chromeExecutable) {
+          await page.setUserAgent(USER_AGENT);
+        }
         await page.setExtraHTTPHeaders({ 'Accept-Language': 'en-US,en;q=0.9' });
         const result = await scrapePage(page, tn);
         results.push(result);
@@ -637,6 +853,9 @@ export async function checkUpsTracking(
     }
   } finally {
     await browser.close();
+    if (!process.env.UPS_BROWSER_USER_DATA_DIR) {
+      fs.rmSync(tempProfileDir, { recursive: true, force: true });
+    }
   }
 
   return results;
