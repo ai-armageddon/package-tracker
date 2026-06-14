@@ -1,6 +1,7 @@
 import { prisma } from '@/lib/db/prisma';
 import { checkTracking } from '@/lib/services/usps';
 import { checkFedExTracking } from '@/lib/services/fedex';
+import { checkUpsTracking } from '@/lib/services/ups';
 import { sendBatchNotification } from '@/lib/services/telegram';
 import type { Carrier } from '@/lib/services/carriers';
 
@@ -41,7 +42,12 @@ async function checkCarrier(
   if (items.length === 0) return { updates: [], toDelete: [] };
 
   const numbers = items.map((i) => i.trackingNumber);
-  const scraper = carrier === 'FedEx' ? checkFedExTracking : checkTracking;
+  const scraper =
+    carrier === 'FedEx'
+      ? checkFedExTracking
+      : carrier === 'UPS'
+        ? checkUpsTracking
+        : checkTracking;
 
   let results;
   try {
@@ -154,13 +160,15 @@ export async function runTrackingCheck() {
   const byCarrier = {
     USPS: activeItems.filter((i) => i.carrier === 'USPS'),
     FedEx: activeItems.filter((i) => i.carrier === 'FedEx'),
+    UPS: activeItems.filter((i) => i.carrier === 'UPS'),
   };
 
   const uspsResult = await checkCarrier('USPS', byCarrier.USPS);
   const fedExResult = await checkCarrier('FedEx', byCarrier.FedEx);
+  const upsResult = await checkCarrier('UPS', byCarrier.UPS);
 
-  const allUpdates = [...uspsResult.updates, ...fedExResult.updates];
-  const allDeletes = [...uspsResult.toDelete, ...fedExResult.toDelete];
+  const allUpdates = [...uspsResult.updates, ...fedExResult.updates, ...upsResult.updates];
+  const allDeletes = [...uspsResult.toDelete, ...fedExResult.toDelete, ...upsResult.toDelete];
 
   if (allUpdates.length > 0) {
     await sendBatchNotification(allUpdates);

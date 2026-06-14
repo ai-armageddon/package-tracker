@@ -1,5 +1,35 @@
-export const CARRIERS = ['USPS', 'FedEx'] as const;
+export const CARRIERS = ["USPS", "FedEx", "UPS"] as const;
 export type Carrier = (typeof CARRIERS)[number];
+
+export function normalizeTrackingNumber(tn: string): string {
+  return tn.replace(/[\s-]+/g, "").toUpperCase();
+}
+
+export function isCarrier(value: string): value is Carrier {
+  return CARRIERS.includes(value as Carrier);
+}
+
+function isUpsTrackingNumber(tn: string): boolean {
+  const cleaned = normalizeTrackingNumber(tn);
+  return (
+    /^1Z[0-9A-Z]{16}$/.test(cleaned) ||
+    /^T\d{10}$/.test(cleaned) ||
+    /^\d{9}$/.test(cleaned) ||
+    /^\d{12}$/.test(cleaned) ||
+    /^\d{18}$/.test(cleaned) ||
+    /^MI\d{6}[0-9A-Z]{1,22}$/.test(cleaned)
+  );
+}
+
+function isDistinctUpsTrackingNumber(tn: string): boolean {
+  const cleaned = normalizeTrackingNumber(tn);
+  return (
+    /^1Z[0-9A-Z]{16}$/.test(cleaned) ||
+    /^T\d{10}$/.test(cleaned) ||
+    /^\d{9}$/.test(cleaned) ||
+    /^MI\d{6}[0-9A-Z]{1,22}$/.test(cleaned)
+  );
+}
 
 export interface CarrierConfig {
   name: string;
@@ -11,35 +41,54 @@ export interface CarrierConfig {
 
 export const CARRIER_CONFIG: Record<Carrier, CarrierConfig> = {
   USPS: {
-    name: 'USPS',
-    trackingUrl: (tn) => `https://tools.usps.com/tracking/${encodeURIComponent(tn)}`,
-    homeUrl: 'https://www.usps.com',
-    favicon: 'https://www.usps.com/favicon.ico',
-    validate: (tn) => /^\d{20,22}$/.test(tn),
+    name: "USPS",
+    trackingUrl: (tn) =>
+      `https://tools.usps.com/tracking/${encodeURIComponent(tn)}`,
+    homeUrl: "https://www.usps.com",
+    favicon: "https://www.usps.com/favicon.ico",
+    validate: (tn) => /^\d{20,22}$/.test(normalizeTrackingNumber(tn)),
   },
   FedEx: {
-    name: 'FedEx',
+    name: "FedEx",
     trackingUrl: (tn) =>
       `https://www.fedex.com/fedextrack/?trknbr=${encodeURIComponent(tn)}`,
-    homeUrl: 'https://www.fedex.com',
-    favicon: 'https://www.fedex.com/favicon.ico',
-    validate: (tn) => /^\d{12,22}$/.test(tn) || /^DT\d{12}$/i.test(tn),
+    homeUrl: "https://www.fedex.com",
+    favicon: "https://www.fedex.com/favicon.ico",
+    validate: (tn) => {
+      const cleaned = normalizeTrackingNumber(tn);
+      return /^\d{12,22}$/.test(cleaned) || /^DT\d{12}$/.test(cleaned);
+    },
+  },
+  UPS: {
+    name: "UPS",
+    trackingUrl: (tn) =>
+      `https://www.ups.com/track?track=yes&trackNums=${encodeURIComponent(tn)}&loc=en_US&requester=ST%2Ftrackdetails`,
+    homeUrl: "https://www.ups.com",
+    favicon: "https://www.ups.com/favicon.ico",
+    validate: isUpsTrackingNumber,
   },
 };
 
 export function detectCarrier(tn: string): Carrier | null {
-  const cleaned = tn.trim().toUpperCase();
-  if (CARRIER_CONFIG.USPS.validate(cleaned)) return 'USPS';
-  if (CARRIER_CONFIG.FedEx.validate(cleaned)) return 'FedEx';
+  const cleaned = normalizeTrackingNumber(tn);
+  if (isDistinctUpsTrackingNumber(cleaned)) return "UPS";
+  if (CARRIER_CONFIG.USPS.validate(cleaned)) return "USPS";
+  if (CARRIER_CONFIG.FedEx.validate(cleaned)) return "FedEx";
   return null;
 }
 
 export function resolveCarrier(
   carrierHint: string | null,
-  tn: string
+  tn: string,
 ): Carrier | null {
   const hint = carrierHint?.trim().toLowerCase();
-  if (hint === 'usps' || hint === 'u') return 'USPS';
-  if (hint === 'fedex' || hint === 'f' || hint === 'fx') return 'FedEx';
+  if (hint === "usps" || hint === "u") return "USPS";
+  if (hint === "fedex" || hint === "f" || hint === "fx") return "FedEx";
+  if (hint === "ups" || hint === "u.p.s.") return "UPS";
   return detectCarrier(tn);
+}
+
+export function getCarrierTrackingUrl(carrier: string, tn: string): string {
+  const knownCarrier = isCarrier(carrier) ? carrier : "USPS";
+  return CARRIER_CONFIG[knownCarrier].trackingUrl(tn);
 }

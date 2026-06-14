@@ -12,6 +12,7 @@ module.exports = {
         'pulse-subtle': 'pulseSubtle 2s ease-in-out infinite',
         'gradient-usps': 'gradientUsps 8s ease-in-out infinite',
         'gradient-fedex': 'gradientFedex 8s ease-in-out infinite',
+        'gradient-ups': 'gradientUps 8s ease-in-out infinite',
       },
       keyframes: {
         fadeIn: {
@@ -43,6 +44,10 @@ module.exports = {
           '50%': { backgroundPosition: '100% 50%' },
         },
         gradientFedex: {
+          '0%, 100%': { backgroundPosition: '0% 50%' },
+          '50%': { backgroundPosition: '100% 50%' },
+        },
+        gradientUps: {
           '0%, 100%': { backgroundPosition: '0% 50%' },
           '50%': { backgroundPosition: '100% 50%' },
         },

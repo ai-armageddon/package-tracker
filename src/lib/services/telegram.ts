@@ -3,6 +3,7 @@ import { message } from 'telegraf/filters';
 import { prisma } from '@/lib/db/prisma';
 import { checkTracking } from '@/lib/services/usps';
 import { checkFedExTracking } from '@/lib/services/fedex';
+import { checkUpsTracking } from '@/lib/services/ups';
 import {
   CARRIER_CONFIG,
   detectCarrier,
@@ -48,12 +49,19 @@ function trackingLink(tn: string, carrier: string = 'USPS'): string {
 }
 
 function carrierBadge(carrier: string): string {
-  return carrier === 'FedEx' ? '🟣' : '🔵';
+  if (carrier === 'FedEx') return '🟣';
+  if (carrier === 'UPS') return '🟤';
+  return '🔵';
 }
 
 async function fetchAndSaveTracking(tn: string, carrier: Carrier): Promise<string> {
   try {
-    const scraper = carrier === 'FedEx' ? checkFedExTracking : checkTracking;
+    const scraper =
+      carrier === 'FedEx'
+        ? checkFedExTracking
+        : carrier === 'UPS'
+          ? checkUpsTracking
+          : checkTracking;
     const results = await scraper([tn]);
     const r = results[0];
     if (!r || !r.events.length) return '';
@@ -252,12 +260,12 @@ async function handleList(ctx: Context) {
 
 async function handleAdd(ctx: Context, args: string) {
   // Parse: [/add] [carrier] <tracking> [title]
-  // carrier can be: usps, fedex, f, u
+  // carrier can be: usps, fedex, ups, f, u
   // If first token is a known carrier keyword, use it; otherwise treat as tracking number
   const parts = args.match(/^(\S+)(?:\s+(\S+)(?:\s+(.+))?)?$/);
   if (!parts) {
     await ctx.reply(
-      'Usage: /add &lt;tracking_number&gt; [title]\nOr: /add usps|fedex &lt;tracking_number&gt; [title]\nExample: /add 9400100000000000\nExample: /add fedex 123456789012',
+      'Usage: /add &lt;tracking_number&gt; [title]\nOr: /add usps|fedex|ups &lt;tracking_number&gt; [title]\nExample: /add 9400100000000000\nExample: /add fedex 123456789012\nExample: /add ups 1Z9999999999999999',
       { parse_mode: 'HTML' }
     );
     return;
@@ -270,10 +278,10 @@ async function handleAdd(ctx: Context, args: string) {
   const first = parts[1].trim();
   const carrierHint = first.toLowerCase();
 
-  if (carrierHint === 'usps' || carrierHint === 'u' || carrierHint === 'fedex' || carrierHint === 'f' || carrierHint === 'fx') {
+  if (carrierHint === 'usps' || carrierHint === 'u' || carrierHint === 'fedex' || carrierHint === 'f' || carrierHint === 'fx' || carrierHint === 'ups') {
     if (!parts[2]) {
       await ctx.reply(
-        'Usage: /add usps|fedex &lt;tracking_number&gt; [title]',
+        'Usage: /add usps|fedex|ups &lt;tracking_number&gt; [title]',
         { parse_mode: 'HTML' }
       );
       return;
@@ -290,7 +298,7 @@ async function handleAdd(ctx: Context, args: string) {
   if (!carrier) {
     addSessions.set(String(ctx.chat!.id), { step: 'awaiting_carrier', trackingNumber });
     await ctx.reply(
-      `Could not auto-detect carrier for <code>${escapeHtml(trackingNumber)}</code>. Reply with <b>USPS</b> or <b>FedEx</b>:`,
+      `Could not auto-detect carrier for <code>${escapeHtml(trackingNumber)}</code>. Reply with <b>USPS</b>, <b>FedEx</b>, or <b>UPS</b>:`,
       { parse_mode: 'HTML' }
     );
     return;
@@ -298,7 +306,7 @@ async function handleAdd(ctx: Context, args: string) {
 
   if (!CARRIER_CONFIG[carrier].validate(trackingNumber)) {
     await ctx.reply(
-      `Invalid ${carrier} tracking number format.\nUSPS: 20–22 digits\nFedEx: 12+ digits or DT+12 digits`,
+      `Invalid ${carrier} tracking number format.\nUSPS: 20–22 digits\nFedEx: 12+ digits or DT+12 digits\nUPS: 1Z + 16 letters/digits`,
       { parse_mode: 'HTML' }
     );
     return;
@@ -344,7 +352,7 @@ async function handleAddState(ctx: Context, text: string): Promise<boolean> {
   if (session.step === 'awaiting_carrier') {
     const carrier = resolveCarrier(text.trim(), '');
     if (!carrier) {
-      await ctx.reply('Please reply with <b>USPS</b> or <b>FedEx</b>.', { parse_mode: 'HTML' });
+      await ctx.reply('Please reply with <b>USPS</b>, <b>FedEx</b>, or <b>UPS</b>.', { parse_mode: 'HTML' });
       return true;
     }
     if (!CARRIER_CONFIG[carrier].validate(session.trackingNumber)) {
@@ -680,11 +688,11 @@ export function startBot() {
   bot.start(async (ctx) => {
     await ctx.reply(
       'Welcome to Package Tracking Bot!\n\n' +
-        'Supports USPS and FedEx.\n\n' +
+        'Supports USPS, FedEx, and UPS.\n\n' +
         'Commands:\n' +
         '/list — List all packages (numbered)\n' +
         '/add &lt;tracking&gt; [title] — Add a package (auto-detect carrier)\n' +
-        '/add usps|fedex &lt;tracking&gt; [title] — Add with explicit carrier\n' +
+        '/add usps|fedex|ups &lt;tracking&gt; [title] — Add with explicit carrier\n' +
         '/edit [number or tracking] — Change a package title\n' +
         '/status &lt;number or tracking&gt; — Get detailed status\n' +
         '/remove &lt;number or tracking&gt; — Remove a package (multi: /remove 1,3)\n' +
@@ -702,7 +710,7 @@ export function startBot() {
   bot.command('add', async (ctx) => {
     const args = ctx.message.text.replace(/^\/add\s*/, '').trim();
     if (!args) {
-      await ctx.reply('Usage: /add &lt;tracking_number&gt; [title]\nOr: /add usps|fedex &lt;tracking_number&gt; [title]');
+      await ctx.reply('Usage: /add &lt;tracking_number&gt; [title]\nOr: /add usps|fedex|ups &lt;tracking_number&gt; [title]');
       return;
     }
     await handleAdd(ctx, args);
@@ -759,7 +767,7 @@ export function startBot() {
       'Commands:\n' +
         '/list — List all packages (numbered)\n' +
         '/add &lt;tracking&gt; [title] — Add a package (auto-detect)\n' +
-        '/add usps|fedex &lt;tracking&gt; [title] — Explicit carrier\n' +
+        '/add usps|fedex|ups &lt;tracking&gt; [title] — Explicit carrier\n' +
         '/edit [number or tracking] — Change a package title\n' +
         '/status &lt;number or tracking&gt; — Get detailed status\n' +
         '/remove &lt;number or tracking&gt; — Remove a package (multi: /remove 1,3)\n' +

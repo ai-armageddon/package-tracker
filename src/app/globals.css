@@ -1,3 +1,274 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer components {
+  .carrier-logo {
+    display: inline-flex;
+    width: 1.75rem;
+    height: 1.75rem;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .carrier-logo svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+
+  .carrier-badge-logo {
+    width: 1.15rem;
+    height: 1.15rem;
+  }
+
+  .carrier-logo-select {
+    width: 2rem;
+    height: 2rem;
+  }
+
+  .carrier-logo-page {
+    width: 2.5rem;
+    height: 2.5rem;
+  }
+
+  .carrier-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    border-width: 1px;
+    border-radius: 0.375rem;
+    padding: 0.125rem 0.45rem 0.125rem 0.25rem;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  .carrier-badge-default {
+    border-color: rgb(55 65 81);
+    background: rgb(31 41 55);
+    color: rgb(156 163 175);
+  }
+
+  .carrier-badge-usps {
+    border-color: rgb(30 64 175 / 0.85);
+    background: linear-gradient(
+      135deg,
+      rgb(30 58 138 / 0.5),
+      rgb(15 23 42 / 0.2)
+    );
+    color: rgb(96 165 250);
+  }
+
+  .carrier-badge-fedex {
+    border-color: rgb(107 33 168 / 0.85);
+    background: linear-gradient(
+      135deg,
+      rgb(88 28 135 / 0.5),
+      rgb(249 115 22 / 0.12)
+    );
+    color: rgb(216 180 254);
+  }
+
+  .carrier-badge-ups {
+    border-color: rgb(180 104 36 / 0.8);
+    background: linear-gradient(
+      135deg,
+      rgb(53 28 15 / 0.78),
+      rgb(91 48 22 / 0.58),
+      rgb(246 190 0 / 0.2)
+    );
+    color: rgb(253 224 119);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.08);
+  }
+
+  .carrier-card {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .carrier-card > * {
+    position: relative;
+    z-index: 1;
+  }
+
+  .carrier-card.carrier-card-default {
+    border-left-color: rgb(75 85 99);
+  }
+
+  .carrier-card.carrier-card-usps {
+    border-left-color: rgb(59 130 246 / 0.55);
+    background-image: linear-gradient(
+      110deg,
+      rgb(37 99 235 / 0.16),
+      rgb(59 130 246 / 0.06),
+      transparent 68%
+    );
+    background-size: 200% 100%;
+    animation: carrierGradientPan 8s ease-in-out infinite;
+  }
+
+  .carrier-card.carrier-card-fedex {
+    border-left-color: rgb(168 85 247 / 0.55);
+    background-image: linear-gradient(
+      110deg,
+      rgb(126 34 206 / 0.16),
+      rgb(249 115 22 / 0.07),
+      transparent 68%
+    );
+    background-size: 200% 100%;
+    animation: carrierGradientPan 8s ease-in-out infinite;
+  }
+
+  .carrier-card.carrier-card-ups {
+    border-left-color: rgb(246 190 0 / 0.82);
+    background-image: linear-gradient(
+      110deg,
+      rgb(53 28 15 / 0.84),
+      rgb(93 49 22 / 0.42),
+      rgb(246 190 0 / 0.14),
+      transparent 72%
+    );
+    background-size: 220% 100%;
+    animation: carrierGradientPan 7s ease-in-out infinite;
+  }
+
+  .carrier-card.carrier-card-ups::after {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    content: "";
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgb(255 220 111 / 0.1),
+      transparent
+    );
+    transform: translateX(-100%);
+    animation: carrierUpsSheen 5.5s ease-in-out infinite;
+  }
+
+  .carrier-detected-default {
+    border-color: rgb(55 65 81);
+    background: rgb(31 41 55);
+    color: rgb(156 163 175);
+  }
+
+  .carrier-detected-usps {
+    border-color: rgb(30 64 175 / 0.4);
+    background: rgb(30 58 138 / 0.2);
+    color: rgb(96 165 250 / 0.75);
+  }
+
+  .carrier-detected-fedex {
+    border-color: rgb(107 33 168 / 0.4);
+    background: rgb(88 28 135 / 0.2);
+    color: rgb(216 180 254 / 0.75);
+  }
+
+  .carrier-detected-ups {
+    border-color: rgb(180 104 36 / 0.45);
+    background: linear-gradient(
+      135deg,
+      rgb(53 28 15 / 0.4),
+      rgb(246 190 0 / 0.12)
+    );
+    color: rgb(253 224 119 / 0.82);
+  }
+
+  .carrier-history-border-default {
+    border-left-color: rgb(75 85 99);
+  }
+
+  .carrier-history-border-usps {
+    border-left-color: rgb(59 130 246 / 0.3);
+  }
+
+  .carrier-history-border-fedex {
+    border-left-color: rgb(168 85 247 / 0.3);
+  }
+
+  .carrier-history-border-ups {
+    border-left-color: rgb(180 104 36 / 0.42);
+  }
+
+  .carrier-history-card-default {
+    background-image: linear-gradient(to right, transparent, transparent);
+  }
+
+  .carrier-history-card-usps {
+    background-image: linear-gradient(
+      to right,
+      rgb(30 58 138 / 0.12),
+      transparent
+    );
+  }
+
+  .carrier-history-card-fedex {
+    background-image: linear-gradient(
+      to right,
+      rgb(88 28 135 / 0.12),
+      transparent
+    );
+  }
+
+  .carrier-history-card-ups {
+    background-image: linear-gradient(
+      to right,
+      rgb(53 28 15 / 0.46),
+      rgb(246 190 0 / 0.08),
+      transparent
+    );
+    background-size: 180% 100%;
+    animation: carrierGradientPan 9s ease-in-out infinite;
+  }
+
+  .carrier-timeline-dot-default {
+    border-color: rgb(107 114 128);
+    background: rgb(107 114 128);
+  }
+
+  .carrier-timeline-dot-usps {
+    border-color: rgb(59 130 246);
+    background: rgb(59 130 246);
+  }
+
+  .carrier-timeline-dot-fedex {
+    border-color: rgb(168 85 247);
+    background: rgb(168 85 247);
+  }
+
+  .carrier-timeline-dot-ups {
+    border-color: rgb(120 63 26);
+    background: rgb(246 190 0);
+    box-shadow: 0 0 16px rgb(246 190 0 / 0.28);
+  }
+}
+
+@keyframes carrierGradientPan {
+  0%,
+  100% {
+    background-position: 0% 50%;
+  }
+
+  50% {
+    background-position: 100% 50%;
+  }
+}
+
+@keyframes carrierUpsSheen {
+  0%,
+  58%,
+  100% {
+    transform: translateX(-100%);
+  }
+
+  76% {
+    transform: translateX(100%);
+  }
+}

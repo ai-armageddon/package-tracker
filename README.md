@@ -1,11 +1,11 @@
-# Package Tracking Notifier
+# Package Tracker
 
-Track USPS and FedEx packages — get Telegram notifications when status changes. No API keys required.
+Track USPS, FedEx, and UPS packages — get Telegram notifications when status changes. No API keys required.
 
 ## Features
 
-- Track USPS and FedEx packages via web UI or Telegram bot
-- Auto-detect carrier from tracking number format (20-22 digits = USPS, 12+ digits = FedEx)
+- Track USPS, FedEx, and UPS packages via web UI or Telegram bot
+- Auto-detect carrier from tracking number format, including common UPS formats like `1Z...`, `T` + 10 digits, 9 digits, and 12 digits
 - Automatic status checks on a configurable interval (default: 15 min)
 - Telegram notifications only when a package's status actually changes — no duplicate pings
 - Fuzzy matching on commands (`/lsit` → suggests `/list`) and tracking numbers/names
@@ -29,7 +29,7 @@ cd package-tracker
 npm install
 
 # Create database
-createdb usps_tracking
+createdb package_tracker
 
 # Configure
 cp .env.example .env
@@ -54,7 +54,7 @@ Open http://localhost:3000 for the web UI, or message your bot on Telegram.
 |---|---|
 | `/list` | List all packages with index, status, carrier, and clickable tracking numbers |
 | `/add <tracking> [title]` | Add a package (auto-detects carrier by format) |
-| `/add usps\|fedex <tracking> [title]` | Add with explicit carrier |
+| `/add usps\|fedex\|ups <tracking> [title]` | Add with explicit carrier |
 | `/edit [number or tracking]` | Change a package title (shows package list if no arg) |
 | `/status <number or tracking>` | Get detailed status + recent history |
 | `/remove <number or tracking>` | Remove a package |
@@ -71,6 +71,9 @@ Use numbers from `/list` (e.g. `/status 1`) or partial names — fuzzy matching 
 | `DATABASE_URL` | PostgreSQL connection string |
 | `TELEGRAM_BOT_TOKEN` | Telegram bot token from BotFather |
 | `TELEGRAM_CHAT_ID` | Your Telegram chat ID |
+| `PACKAGE_TRACKER_USERNAME` | Web UI username (default: `admin`) |
+| `PACKAGE_TRACKER_PASSWORD` | Web UI password (default: `pass`) |
+| `PACKAGE_TRACKER_SESSION_SECRET` | Secret used to sign the login cookie; set a long random value in production |
 | `CHECK_INTERVAL_MINUTES` | Status check interval (default: 15) |
 | `RUN_INITIAL_TRACKING_CHECK` | Set to `true` to check packages immediately on app startup; defaults to `false` |
 | `FEDEX_BROWSER_MODE` | `headless` for server-safe checks, or `headful` for local debugging/virtual displays |
@@ -86,6 +89,15 @@ No external API keys needed. The app uses Puppeteer with a stealth plugin to ren
 |---|---|---|
 | USPS | 20–22 digits | tools.usps.com |
 | FedEx | 12+ digits or DT+12 digits | fedex.com |
+| UPS | 1Z + 16 letters/digits, T + 10 digits, 9 digits, 12 digits, 18 digits, or MI package IDs | ups.com |
+
+## UPS Support
+
+UPS tracking is now built into the app and works the same way as USPS and FedEx in both the web UI and Telegram bot.
+
+- Auto-detects common UPS formats, including `1Z...`, `T` + 10 digits, 9 digits, 12 digits, 18 digits, and `MI` package IDs
+- Supports explicit carrier selection with `/add ups <tracking> [title]`
+- Opens the official UPS tracking page for clickable links and package details
 
 ## Tech Stack
 

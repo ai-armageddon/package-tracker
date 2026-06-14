@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db/prisma';
+import { createTrackingItem } from '@/lib/services/tracking-items';
+
+export const dynamic = 'force-dynamic';
 
 export async function GET() {
   try {
@@ -15,33 +18,13 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { trackingNumber, carrier, title, note } = body;
+    const result = await createTrackingItem(body, { checkInitial: false });
 
-    if (!trackingNumber || typeof trackingNumber !== 'string') {
-      return NextResponse.json({ error: 'trackingNumber is required' }, { status: 400 });
+    if (!result.ok) {
+      return NextResponse.json({ error: result.error }, { status: result.status });
     }
 
-    const cleaned = trackingNumber.trim().toUpperCase();
-    const resolvedCarrier = (carrier || 'USPS').toString().trim();
-
-    const existing = await prisma.trackingItem.findFirst({
-      where: { trackingNumber: cleaned, carrier: resolvedCarrier },
-    });
-
-    if (existing) {
-      return NextResponse.json({ error: 'Tracking number already exists for this carrier' }, { status: 409 });
-    }
-
-    const item = await prisma.trackingItem.create({
-      data: {
-        trackingNumber: cleaned,
-        carrier: resolvedCarrier,
-        title: title || null,
-        note: note || null,
-      },
-    });
-
-    return NextResponse.json(item, { status: 201 });
+    return NextResponse.json(result.item, { status: 201 });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }

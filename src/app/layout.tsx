@@ -1,5 +1,7 @@
 import type { Metadata } from 'next';
 import { execSync } from 'child_process';
+import { cookies } from 'next/headers';
+import { AUTH_COOKIE_NAME, verifySessionToken } from '@/lib/auth';
 import './globals.css';
 
 function getVersion() {
@@ -12,16 +14,18 @@ function getVersion() {
 }
 
 export const metadata: Metadata = {
-  title: 'Package Tracking Notifier',
-  description: 'Track USPS & FedEx packages and get Telegram notifications',
+  title: 'Package Tracker',
+  description: 'Track packages across carriers and get Telegram notifications',
   icons: { icon: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">📦</text></svg>' },
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const signedIn = await verifySessionToken(cookies().get(AUTH_COOKIE_NAME)?.value);
+
   return (
     <html lang="en">
       <body className="bg-gray-950 text-gray-100 min-h-screen flex flex-col">
@@ -41,11 +45,25 @@ export default function RootLayout({
                   <rect width="86" height="24" rx="5" fill="#2D1B4E"/>
                   <text x="43" y="17" textAnchor="middle" fontFamily="'Arial Black',Arial,Helvetica,sans-serif" fontWeight="900" fontSize="14"><tspan fill="#A855F7">Fed</tspan><tspan fill="#FF6600">Ex</tspan></text>
                 </svg>
+                <svg viewBox="0 0 72 24" className="h-5 w-auto" aria-label="UPS">
+                  <rect width="72" height="24" rx="5" fill="#351C15"/>
+                  <text x="36" y="16.5" textAnchor="middle" fontFamily="Arial,Helvetica,sans-serif" fontWeight="900" fontSize="12.5" fill="#FFB500" letterSpacing="1">UPS</text>
+                </svg>
               </div>
             </div>
             <div className="flex items-center gap-3">
               <span className="text-xs font-mono text-[#A855F7]">{getVersion()}</span>
               <span className="text-xs text-gray-500">via Telegram</span>
+              {signedIn && (
+                <form action="/api/auth/logout" method="post">
+                  <button
+                    type="submit"
+                    className="text-xs text-gray-400 hover:text-gray-100 border border-gray-700 hover:border-gray-500 rounded px-2 py-1 transition-colors"
+                  >
+                    Sign out
+                  </button>
+                </form>
+              )}
             </div>
           </div>
         </header>

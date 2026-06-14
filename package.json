@@ -1,7 +1,7 @@
 {
-  "name": "usps-tg-notif",
+  "name": "package-tracker",
   "version": "1.0.0",
-  "description": "USPS tracking notification via Telegram",
+  "description": "Multi-carrier package tracking with Telegram notifications",
   "private": true,
   "scripts": {
     "dev": "next dev",

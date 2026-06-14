@@ -1,7 +1,12 @@
-'use client';
+"use client";
 
-import { useState, useEffect } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useState, useEffect } from "react";
+import { useParams, useRouter } from "next/navigation";
+import {
+  CarrierBadge,
+  CarrierLogo,
+  getCarrierTheme,
+} from "@/components/carrier-brand";
 
 interface StatusEvent {
   id: string;
@@ -27,24 +32,6 @@ interface TrackingWithHistory {
   statusHistory: StatusEvent[];
 }
 
-function carrierBorder(carrier: string) {
-  if (carrier === 'USPS') return 'border-l-blue-500/30';
-  if (carrier === 'FedEx') return 'border-l-purple-500/30';
-  return 'border-l-gray-600';
-}
-
-function carrierHighlight(carrier: string) {
-  if (carrier === 'USPS') return 'bg-blue-500 border-blue-500';
-  if (carrier === 'FedEx') return 'bg-purple-500 border-purple-500';
-  return 'bg-gray-500 border-gray-500';
-}
-
-function carrierGradient(carrier: string) {
-  if (carrier === 'USPS') return 'from-blue-950/10';
-  if (carrier === 'FedEx') return 'from-purple-950/10';
-  return 'from-transparent';
-}
-
 export default function HistoryPage() {
   const params = useParams();
   const router = useRouter();
@@ -54,10 +41,19 @@ export default function HistoryPage() {
 
   useEffect(() => {
     fetch(`/api/trackings/${params.id}/history`)
-      .then((res) => res.json())
+      .then((res) => {
+        if (res.status === 401) {
+          router.push("/login");
+          return null;
+        }
+
+        return res.json();
+      })
       .then((d) => {
+        if (!d) return;
+
         if (d.error) {
-          router.push('/');
+          router.push("/");
         } else {
           setData(d);
         }
@@ -75,23 +71,29 @@ export default function HistoryPage() {
     );
   if (!data) return null;
 
+  const carrierTheme = getCarrierTheme(data.carrier);
+
   return (
     <div className="space-y-6">
       <div
         className={`flex items-center gap-4 transition-all duration-500 ${
-          mounted ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-4'
+          mounted ? "opacity-100 translate-x-0" : "opacity-0 -translate-x-4"
         }`}
       >
         <button
-          onClick={() => router.push('/')}
+          onClick={() => router.push("/")}
           className="text-sm text-blue-400 hover:text-blue-300 transition-colors"
         >
           &larr; Back
         </button>
-        <div>
-          <h2 className="text-xl font-bold">
-            {data.title || data.trackingNumber}
-          </h2>
+        <CarrierLogo carrier={data.carrier} className="carrier-logo-page" />
+        <div className="min-w-0">
+          <div className="flex items-center gap-3 flex-wrap">
+            <h2 className="text-xl font-bold">
+              {data.title || data.trackingNumber}
+            </h2>
+            <CarrierBadge carrier={data.carrier} />
+          </div>
           {data.title && (
             <code className="text-xs bg-gray-800 px-2 py-0.5 rounded text-gray-400">
               {data.trackingNumber}
@@ -108,31 +110,37 @@ export default function HistoryPage() {
           No status events recorded yet.
         </p>
       ) : (
-        <div className={`relative pl-6 border-l ${carrierBorder(data.carrier)} space-y-6`}>
+        <div
+          className={`relative pl-6 border-l ${carrierTheme.historyBorderClass} space-y-6`}
+        >
           {data.statusHistory.map((event, i) => (
             <div
               key={event.id}
               className="relative"
               style={{
                 opacity: mounted ? 1 : 0,
-                transform: mounted ? 'translateY(0)' : 'translateY(8px)',
+                transform: mounted ? "translateY(0)" : "translateY(8px)",
                 transitionDelay: `${i * 80}ms`,
-                transitionDuration: '400ms',
-                transitionProperty: 'opacity, transform',
-                transitionTimingFunction: 'ease-out',
+                transitionDuration: "400ms",
+                transitionProperty: "opacity, transform",
+                transitionTimingFunction: "ease-out",
               }}
             >
               <div
                 className={`absolute -left-[25px] top-1 w-2.5 h-2.5 rounded-full border-2 transition-all duration-500 ${
                   i === 0
-                    ? `${carrierHighlight(data.carrier)} animate-pulse-subtle`
-                    : 'bg-gray-800 border-gray-600'
+                    ? `${carrierTheme.timelineDotClass} animate-pulse-subtle`
+                    : "bg-gray-800 border-gray-600"
                 }`}
               />
-              <div className={`bg-gray-900 border border-gray-800 rounded-lg p-4 transition-colors hover:border-gray-700 bg-gradient-to-r ${carrierGradient(data.carrier)} to-transparent`}>
+              <div
+                className={`bg-gray-900 border border-gray-800 rounded-lg p-4 transition-colors hover:border-gray-700 ${carrierTheme.historyCardClass}`}
+              >
                 <div className="flex items-start justify-between gap-4">
                   <div>
-                    <span className="font-medium text-blue-400">
+                    <span
+                      className={`font-medium ${carrierTheme.statusTextClass}`}
+                    >
                       {event.status}
                     </span>
                     <p className="text-sm text-gray-400 mt-1 whitespace-pre-wrap">
