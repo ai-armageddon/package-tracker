@@ -98,6 +98,14 @@ export async function verifySessionToken(token?: string) {
   }
 }
 
+export function getPublicUrl(request: { headers: Headers; url: string }): URL {
+  const forwardedProto = request.headers.get('x-forwarded-proto');
+  const forwardedHost = request.headers.get('x-forwarded-host');
+  const host = forwardedHost || request.headers.get('host') || 'localhost';
+  const protocol = forwardedProto || (host.includes('localhost') ? 'http' : 'https');
+  return new URL(`${protocol}://${host}`);
+}
+
 export function getSafeNextPath(value: FormDataEntryValue | string | null | undefined) {
   if (typeof value !== 'string') return '/';
   if (!value.startsWith('/') || value.startsWith('//')) return '/';

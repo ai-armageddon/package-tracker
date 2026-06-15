@@ -1,5 +1,6 @@
 import puppeteer from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
+import treeKill from 'tree-kill';
 
 puppeteer.use(StealthPlugin());
 
@@ -233,6 +234,7 @@ export async function checkTracking(
 
   const browser = await puppeteer.launch({
     headless: true,
+    executablePath: '/usr/bin/google-chrome',
     args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
   });
 
@@ -255,7 +257,11 @@ export async function checkTracking(
       await new Promise((r) => setTimeout(r, 3000));
     }
   } finally {
-    await browser.close();
+    const pid = browser.process()?.pid;
+    await browser.close().catch(() => {});
+    if (pid) {
+      await new Promise<void>((resolve) => treeKill(pid, 'SIGKILL', () => resolve()));
+    }
   }
 
   return results;

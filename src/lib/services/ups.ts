@@ -1,5 +1,6 @@
 import puppeteer from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
+import treeKill from 'tree-kill';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -852,7 +853,11 @@ export async function checkUpsTracking(
       await delay(3000);
     }
   } finally {
-    await browser.close();
+    const pid = browser.process()?.pid;
+    await browser.close().catch(() => {});
+    if (pid) {
+      await new Promise<void>((resolve) => treeKill(pid, 'SIGKILL', () => resolve()));
+    }
     if (!process.env.UPS_BROWSER_USER_DATA_DIR) {
       fs.rmSync(tempProfileDir, { recursive: true, force: true });
     }

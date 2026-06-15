@@ -3,6 +3,7 @@ import {
   AUTH_COOKIE_NAME,
   SESSION_MAX_AGE_SECONDS,
   createSessionToken,
+  getPublicUrl,
   getSafeNextPath,
   verifyCredentials,
 } from '@/lib/auth';
@@ -18,14 +19,16 @@ export async function POST(request: NextRequest) {
     typeof password !== 'string' ||
     !verifyCredentials(username, password)
   ) {
-    const loginUrl = new URL('/login', request.url);
+    const base = getPublicUrl(request);
+    const loginUrl = new URL('/login', base);
     loginUrl.searchParams.set('error', '1');
     loginUrl.searchParams.set('next', nextPath);
 
     return NextResponse.redirect(loginUrl, { status: 303 });
   }
 
-  const response = NextResponse.redirect(new URL(nextPath, request.url), { status: 303 });
+  const base = getPublicUrl(request);
+  const response = NextResponse.redirect(new URL(nextPath, base), { status: 303 });
   response.cookies.set(AUTH_COOKIE_NAME, await createSessionToken(), {
     httpOnly: true,
     maxAge: SESSION_MAX_AGE_SECONDS,

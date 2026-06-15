@@ -1,5 +1,6 @@
 import puppeteer from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
+import treeKill from 'tree-kill';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -590,6 +591,7 @@ async function scrapePage(
 async function launchFedExBrowser(headless: boolean) {
   return puppeteer.launch({
     headless,
+    executablePath: '/usr/bin/google-chrome',
     defaultViewport: headless ? undefined : null,
     args: [
       ...(headless ? ['--no-sandbox', '--disable-setuid-sandbox'] : []),
@@ -628,7 +630,11 @@ async function scrapeNumbers(
       await delay(3000);
     }
   } finally {
-    await browser.close();
+    const pid = browser.process()?.pid;
+    await browser.close().catch(() => {});
+    if (pid) {
+      await new Promise<void>((resolve) => treeKill(pid, 'SIGKILL', () => resolve()));
+    }
   }
 
   return results;

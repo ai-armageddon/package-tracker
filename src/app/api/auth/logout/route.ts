@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { AUTH_COOKIE_NAME } from '@/lib/auth';
+import { AUTH_COOKIE_NAME, getPublicUrl } from '@/lib/auth';
 
 export async function POST(request: NextRequest) {
-  const response = NextResponse.redirect(new URL('/login', request.url), { status: 303 });
+  const base = getPublicUrl(request);
+  const response = NextResponse.redirect(new URL('/login', base), { status: 303 });
   response.cookies.set(AUTH_COOKIE_NAME, '', {
     httpOnly: true,
     maxAge: 0,

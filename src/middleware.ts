@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { AUTH_COOKIE_NAME, getSafeNextPath, verifySessionToken } from '@/lib/auth';
 
 function isPublicAsset(pathname: string) {
-  return pathname.startsWith('/_next') || pathname === '/favicon.ico' || /\.[^/]+$/.test(pathname);
+  return pathname.startsWith('/_next') || pathname === '/favicon.ico' || /\.(?:svg|png|jpg|jpeg|gif|webp|ico|css|js)$/.test(pathname);
 }
 
 export async function middleware(request: NextRequest) {
@@ -37,5 +37,5 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|css|js)$).*)'],
 };
