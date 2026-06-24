@@ -288,6 +288,7 @@ function parseActivities(detail: JsonRecord): TrackingEvent[] {
         getDeepString(activity, [
           'activityScan',
           'milestoneName',
+          'name',
           'status',
           'statusDescription',
           'packageStatus',
@@ -640,7 +641,10 @@ async function clickVisibleByText(
   return page.evaluate(
     (source, flags) => {
       const matcher = new RegExp(source, flags);
-      const isVisible = (el: Element) => {
+      const element = Array.from(
+        document.querySelectorAll<HTMLElement>('button, a')
+      ).find((el) => {
+        if (!matcher.test((el.textContent || '').trim())) return false;
         const rect = el.getBoundingClientRect();
         const style = window.getComputedStyle(el);
         return (
@@ -649,11 +653,7 @@ async function clickVisibleByText(
           style.display !== 'none' &&
           style.visibility !== 'hidden'
         );
-      };
-
-      const element = Array.from(
-        document.querySelectorAll<HTMLElement>('button, a')
-      ).find((el) => matcher.test((el.textContent || '').trim()) && isVisible(el));
+      });
 
       if (!element) return false;
       element.click();
@@ -707,9 +707,16 @@ async function scrapePage(
   const jsonPayloads: unknown[] = [];
   let sawNoContentStatus = false;
 
+  const debug = process.env.UPS_DEBUG === 'true';
+
   const responseHandler = async (response: import('puppeteer').HTTPResponse) => {
-    if (!response.url().includes('/track/api/Track/GetStatus')) return;
-    if (response.request().method() !== 'POST') return;
+    const url = response.url();
+    const method = response.request().method();
+    if (debug && (url.includes('/track') || url.includes('/Track'))) {
+      console.log(`[UPS DEBUG] ${method} ${response.status()} ${url}`);
+    }
+    if (!url.includes('/track/api/Track/GetStatus') && !url.includes('/track/api/Track/GetStatusExt')) return;
+    if (method !== 'POST') return;
 
     if (response.status() === 204) {
       sawNoContentStatus = true;
@@ -720,7 +727,9 @@ async function scrapePage(
     if (!/json/i.test(contentType)) return;
 
     try {
-      jsonPayloads.push(await response.json());
+      const json = await response.json();
+      if (debug) console.log(`[UPS DEBUG] JSON payload for ${trackingNumber}:\n`, JSON.stringify(json, null, 2).slice(0, 4000));
+      jsonPayloads.push(json);
     } catch {
       // Ignore malformed or unavailable response bodies; rendered text parsing is next.
     }
@@ -754,6 +763,7 @@ async function scrapePage(
     }
 
     const text = await page.evaluate(() => document.body.innerText || '');
+    if (debug) console.log(`[UPS DEBUG] Rendered text for ${trackingNumber} (first 2000 chars):\n`, text.slice(0, 2000));
     const parsedText = parseRenderedText(text, trackingNumber);
 
     if (parsedText.events.length > 0 || !sawNoContentStatus) return parsedText;
@@ -784,7 +794,15 @@ async function waitForUpsResult(
     const hasResult = await page
       .evaluate((tn) => {
         const text = document.body.innerText || '';
-        return text.includes('Tracking Details') && text.toUpperCase().includes(tn);
+        const hasTrackingContent =
+          text.includes('Tracking Details') ||
+          text.includes('Shipment Progress') ||
+          text.includes('Package Progress') ||
+          text.includes('Tracking Results') ||
+          /delivered/i.test(text) ||
+          /out for delivery/i.test(text) ||
+          /in transit/i.test(text);
+        return hasTrackingContent && text.toUpperCase().includes(tn);
       }, normalized)
       .catch(() => false);
 
