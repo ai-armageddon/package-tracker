@@ -324,6 +324,26 @@ function parseActivities(detail: JsonRecord): TrackingEvent[] {
     .filter((event): event is TrackingEvent => !!event && (!!event.status || !!event.detail));
 }
 
+function getCurrentMilestone(detail: JsonRecord): JsonRecord | null {
+  const milestoneValues = [detail.milestones, detail.milestoneList];
+
+  for (const milestones of milestoneValues) {
+    if (!Array.isArray(milestones)) continue;
+    const current = milestones.find(
+      (milestone): milestone is JsonRecord =>
+        isRecord(milestone) && (milestone.isCurrent === true || getOwnString(milestone, ['isCurrent']) === 'true')
+    );
+    if (current) return current;
+  }
+
+  return isRecord(detail.currentMilestone) ? detail.currentMilestone : null;
+}
+
+function isSameEventMoment(a: TrackingEvent, b: TrackingEvent): boolean {
+  if (!a.date && !a.time && !b.date && !b.time) return false;
+  return a.date === b.date && a.time === b.time && (!a.location || !b.location || a.location === b.location);
+}
+
 function parseJsonResponse(
   payload: unknown,
   trackingNumber: string
@@ -341,7 +361,7 @@ function parseJsonResponse(
     return { trackingNumber, summary: 'UPS tracking temporarily unavailable', events: [] };
   }
 
-  const events = parseActivities(detail);
+  let events = parseActivities(detail);
   const estimatedDelivery = buildEstimatedDelivery(detail);
   const status =
     getDeepString(detail, [
@@ -354,11 +374,10 @@ function parseJsonResponse(
     ]) || errorText;
   const location = getLocation(detail);
   const { date, time } = extractDateTime(detail);
-  const currentStatus = status || getDeepString(detail, ['currentMilestone', 'name']);
-  const currentLocation = getLocation(detail.currentMilestone);
-  const currentDateTime = isRecord(detail.currentMilestone)
-    ? extractDateTime(detail.currentMilestone)
-    : { date, time };
+  const currentMilestone = getCurrentMilestone(detail);
+  const currentStatus = status || getDeepString(currentMilestone, ['name']);
+  const currentLocation = getLocation(currentMilestone) || location;
+  const currentDateTime = currentMilestone ? extractDateTime(currentMilestone) : { date, time };
 
   if (events.length === 0 && status && !/tracking number|shipment progress|details/i.test(status)) {
     events.push({
@@ -392,14 +411,33 @@ function parseJsonResponse(
   const currentIndex = events.findIndex(
     (event) =>
       (!!currentStatus && event.status.toLowerCase() === currentStatus.toLowerCase()) ||
-      (!!currentLocation && event.location === currentLocation) ||
       (!!currentDateTime.date && event.date === currentDateTime.date && event.time === currentDateTime.time)
   );
   if (currentIndex >= 0) {
+    const currentEvent = events[currentIndex];
+    const statusMatchesCurrent =
+      !!currentStatus && currentEvent.status.toLowerCase() === currentStatus.toLowerCase();
+    const matchingScan = events.find(
+      (event, index) =>
+        index !== currentIndex &&
+        isSameEventMoment(event, currentEvent) &&
+        (!currentStatus || event.status.toLowerCase() !== currentStatus.toLowerCase())
+    );
+    const detailSource = statusMatchesCurrent
+      ? matchingScan?.detail || matchingScan?.status || currentEvent.detail || currentEvent.status
+      : currentEvent.detail || currentEvent.status;
+
     events[currentIndex] = {
-      ...events[currentIndex],
-      detail: withEstimatedDelivery(events[currentIndex].detail || events[currentIndex].status, estimatedDelivery),
+      ...currentEvent,
+      status: currentStatus || currentEvent.status,
+      detail: withEstimatedDelivery(detailSource, estimatedDelivery),
+      location: currentEvent.location || currentLocation,
     };
+
+    const mergedCurrent = events[currentIndex];
+    events = events.filter(
+      (event, index) => index === currentIndex || !isSameEventMoment(event, mergedCurrent)
+    );
   }
 
   const deduped = events.filter(
@@ -435,7 +473,7 @@ function isLikelyStatus(line: string): boolean {
 }
 
 function isLikelyLocation(line: string): boolean {
-  return /^[A-Z][A-Z .'-]+,\s*[A-Z]{2}(?:\s+\d{5})?(?:,\s*[A-Z]{2})?$/i.test(line);
+  return /^[A-Z][A-Z .'-]+,\s*[A-Z]{2}(?:\s+\d{5})?(?:,\s*(?:[A-Z]{2}|[A-Z][A-Z .'-]+))?$/i.test(line);
 }
 
 function getLineAfterLabel(lines: string[], label: RegExp): string {
@@ -461,6 +499,77 @@ function parseLastLocationLine(line: string): { location: string; date: string; 
     date: match[2],
     time: normalizeTime(match[3]),
   };
+}
+
+function isRenderedNoiseLine(line: string, trackingNumber: string): boolean {
+  return (
+    normalizeTrackingNumber(line) === normalizeTrackingNumber(trackingNumber) ||
+    /^(tracking|track|tracking number|shipment progress|date|time|status|location|details|view details|show details|hide details|help|recently tracked|watchlist|sign up|log in|tracking results|package history|select time zone|change my delivery|notify me)$/i.test(line) ||
+    /^keyboard_arrow_/i.test(line) ||
+    /^expand_(?:more|less)$/i.test(line)
+  );
+}
+
+function parseDateBlockEvents(
+  lines: string[],
+  trackingNumber: string,
+  dateRe: RegExp,
+  timeRe: RegExp
+): TrackingEvent[] {
+  const events: TrackingEvent[] = [];
+
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index];
+    const hasDate = dateRe.test(line);
+    if (!hasDate) continue;
+
+    const date = normalizeWhitespace(line.replace(timeRe, ''));
+    const timeOnDateLine = line.match(timeRe)?.[0] || '';
+    const nextLineTime = lines[index + 1]?.match(timeRe)?.[0] || '';
+    const time = normalizeTime(timeOnDateLine || nextLineTime);
+    const contentStart = timeOnDateLine ? index + 1 : nextLineTime ? index + 2 : index + 1;
+    let contentEnd = contentStart;
+
+    while (contentEnd < lines.length && !dateRe.test(lines[contentEnd])) {
+      contentEnd++;
+    }
+
+    const block = lines
+      .slice(contentStart, contentEnd)
+      .filter((candidate) => !timeRe.test(candidate))
+      .filter((candidate) => !isRenderedNoiseLine(candidate, trackingNumber));
+
+    if (block.length === 0) continue;
+
+    let locationIndex = -1;
+    for (let blockIndex = block.length - 1; blockIndex >= 0; blockIndex--) {
+      if (isLikelyLocation(block[blockIndex])) {
+        locationIndex = blockIndex;
+        break;
+      }
+    }
+    const location = locationIndex >= 0 ? block[locationIndex] : '';
+    const descriptionLines = block.filter((_, blockIndex) => blockIndex !== locationIndex);
+    if (descriptionLines.length === 0) continue;
+
+    const statusIndex = descriptionLines.findIndex((candidate) => isLikelyStatus(candidate));
+    const status = statusIndex >= 0 ? descriptionLines[statusIndex] : descriptionLines[0];
+    const detailLines =
+      statusIndex >= 0
+        ? descriptionLines.filter((_, detailIndex) => detailIndex !== statusIndex)
+        : descriptionLines.slice(1);
+    const detail = detailLines.length > 0 ? detailLines.join(' ') : status;
+
+    events.push({
+      status,
+      detail,
+      location,
+      date,
+      time,
+    });
+  }
+
+  return events;
 }
 
 function parseRenderedText(text: string, trackingNumber: string): TrackingResult {
@@ -502,12 +611,10 @@ function parseRenderedText(text: string, trackingNumber: string): TrackingResult
   const dateRe =
     /^(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday,\s*)?(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)\s+\d{1,2},?\s+\d{4}|^\d{1,2}\/\d{1,2}\/\d{2,4}/i;
   const timeRe = /\b\d{1,2}:\d{2}\s*(?:A\.?M\.?|P\.?M\.?|AM|PM)\b/i;
-  const noiseRe =
-    /^(tracking|track|tracking number|shipment progress|date|time|status|location|details|view details|show details|help|recently tracked|watchlist|sign up|log in|tracking results)$/i;
 
   let summary = '';
   for (const line of lines) {
-    if (noiseRe.test(line)) continue;
+    if (isRenderedNoiseLine(line, trackingNumber)) continue;
     if (isLikelyStatus(line)) {
       summary = line;
       break;
@@ -517,58 +624,7 @@ function parseRenderedText(text: string, trackingNumber: string): TrackingResult
   const estimatedDelivery = getLineAfterLabel(lines, /^estimated delivery$/i);
   const lastLocation = parseLastLocationLine(getLineAfterLabel(lines, /^last location:?$/i));
 
-  for (let index = 0; index < lines.length; index++) {
-    const line = lines[index];
-    const hasDate = dateRe.test(line);
-    const hasTime = timeRe.test(line);
-    if (!hasDate && !hasTime) continue;
-
-    const date = hasDate
-      ? normalizeWhitespace(line.replace(timeRe, ''))
-      : dateRe.test(lines[index - 1] || '')
-        ? lines[index - 1]
-        : '';
-    const time = hasTime
-      ? normalizeTime(line.match(timeRe)?.[0] || '')
-      : timeRe.test(lines[index + 1] || '')
-        ? normalizeTime(lines[index + 1].match(timeRe)?.[0] || '')
-        : '';
-
-    let status = '';
-    let location = '';
-
-    for (let scan = index + 1; scan < Math.min(lines.length, index + 7); scan++) {
-      const candidate = lines[scan];
-      if (!status && isLikelyStatus(candidate) && !noiseRe.test(candidate)) {
-        status = candidate;
-        continue;
-      }
-      if (!location && isLikelyLocation(candidate)) {
-        location = candidate;
-      }
-      if (status && location) break;
-    }
-
-    for (let scan = index - 1; scan >= Math.max(0, index - 5); scan--) {
-      const candidate = lines[scan];
-      if (!status && isLikelyStatus(candidate) && !noiseRe.test(candidate)) {
-        status = candidate;
-      }
-      if (!location && isLikelyLocation(candidate)) {
-        location = candidate;
-      }
-      if (status && location) break;
-    }
-
-    if (!status) continue;
-    events.push({
-      status,
-      detail: status,
-      location,
-      date,
-      time,
-    });
-  }
+  events.push(...parseDateBlockEvents(lines, trackingNumber, dateRe, timeRe));
 
   const deduped = events.filter(
     (event, index, allEvents) =>
@@ -641,10 +697,21 @@ async function clickVisibleByText(
   return page.evaluate(
     (source, flags) => {
       const matcher = new RegExp(source, flags);
+      const normalizeButtonText = (value: string) =>
+        value
+          .replace(/\bkeyboard_arrow_(?:up|down|left|right)\b/gi, ' ')
+          .replace(/\bexpand_(?:more|less)\b/gi, ' ')
+          .replace(/\s+/g, ' ')
+          .trim();
       const element = Array.from(
-        document.querySelectorAll<HTMLElement>('button, a')
+        document.querySelectorAll<HTMLElement>('button, a, [role="button"]')
       ).find((el) => {
-        if (!matcher.test((el.textContent || '').trim())) return false;
+        const labels = [
+          normalizeButtonText(el.innerText || ''),
+          normalizeButtonText(el.textContent || ''),
+          normalizeButtonText(el.getAttribute('aria-label') || ''),
+        ].filter(Boolean);
+        if (!labels.some((label) => matcher.test(label))) return false;
         const rect = el.getBoundingClientRect();
         const style = window.getComputedStyle(el);
         return (
@@ -656,12 +723,38 @@ async function clickVisibleByText(
       });
 
       if (!element) return false;
+      element.scrollIntoView({ block: 'center', inline: 'center' });
       element.click();
       return true;
     },
     pattern.source,
     pattern.flags
   );
+}
+
+async function expandUpsDetails(page: import('puppeteer').Page): Promise<boolean> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const alreadyExpanded = await page
+      .evaluate(() => /package history|hide details/i.test(document.body.innerText || ''))
+      .catch(() => false);
+    if (alreadyExpanded) return true;
+
+    const clicked = await clickVisibleByText(
+      page,
+      /^(view all shipping details|view detailed progress|show details|view details)$/i
+    );
+    if (!clicked) return false;
+
+    await page
+      .waitForFunction(() => /package history|hide details/i.test(document.body.innerText || ''), {
+        timeout: 5000,
+      })
+      .catch(() => undefined);
+  }
+
+  return page
+    .evaluate(() => /package history|hide details/i.test(document.body.innerText || ''))
+    .catch(() => false);
 }
 
 async function submitTrackingFormIfNeeded(
@@ -737,34 +830,68 @@ async function scrapePage(
 
   page.on('response', responseHandler);
 
-  try {
-    const url = `${TRACK_URL}?track=yes&trackNums=${encodeURIComponent(trackingNumber)}&loc=en_US&requester=ST%2Ftrackdetails`;
-    await page.goto(url, {
-      waitUntil: 'domcontentloaded',
-      timeout: 45000,
-    });
-
-    await waitForUpsResult(page, jsonPayloads, trackingNumber);
-    await clickVisibleByText(page, /^(allow all|accept all cookies|essential cookies only)$/i);
-    await clickVisibleByText(page, /^(view all shipping details|view detailed progress|show details|view details)$/i);
-
+  const parseCapturedPayloads = (): TrackingResult | null => {
     for (const payload of jsonPayloads) {
       const parsed = parseJsonResponse(payload, trackingNumber);
       if (parsed && parsed.events.length > 0) return parsed;
+    }
+    return null;
+  };
+
+  const dismissConsent = async () => {
+    await clickVisibleByText(
+      page,
+      /^(allow all|accept all cookies|accept all|essential cookies only|i agree|got it)$/i
+    );
+  };
+
+  try {
+    const url = `${TRACK_URL}?track=yes&trackNums=${encodeURIComponent(trackingNumber)}&loc=en_US&requester=ST%2Ftrackdetails`;
+
+    // The UPS SPA occasionally returns a 204 (anti-bot) or fails to fire the
+    // GetStatus call on the first load. Reload a couple of times before giving up.
+    const maxAttempts = 3;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      if (attempt === 1) {
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45000 });
+      } else {
+        sawNoContentStatus = false;
+        if (debug) console.log(`[UPS DEBUG] Reload attempt ${attempt} for ${trackingNumber}`);
+        await page.reload({ waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {});
+      }
+
+      // Accept cookie consent up front — on a fresh profile the consent gate can
+      // block the GetStatus API from firing at all.
+      await dismissConsent();
+      await waitForUpsResult(page, jsonPayloads, trackingNumber);
+      await dismissConsent();
+      await expandUpsDetails(page);
+
+      const parsed = parseCapturedPayloads();
+      if (parsed) return parsed;
+
+      // Got JSON but it had no events (genuine "no info yet"), stop retrying.
+      if (jsonPayloads.length > 0 && !sawNoContentStatus) break;
     }
 
     const submitted = await submitTrackingFormIfNeeded(page, trackingNumber);
     if (submitted) await waitForUpsResult(page, jsonPayloads, trackingNumber);
-    await clickVisibleByText(page, /^(view all shipping details|view detailed progress|show details|view details)$/i);
+    await expandUpsDetails(page);
 
-    for (const payload of jsonPayloads) {
-      const parsed = parseJsonResponse(payload, trackingNumber);
-      if (parsed && parsed.events.length > 0) return parsed;
-    }
+    const parsedAfterSubmit = parseCapturedPayloads();
+    if (parsedAfterSubmit) return parsedAfterSubmit;
 
     const text = await page.evaluate(() => document.body.innerText || '');
     if (debug) console.log(`[UPS DEBUG] Rendered text for ${trackingNumber} (first 2000 chars):\n`, text.slice(0, 2000));
     const parsedText = parseRenderedText(text, trackingNumber);
+
+    if (parsedText.events.length === 0) {
+      console.warn(
+        `[UPS] No events for ${trackingNumber} ` +
+          `(jsonPayloads=${jsonPayloads.length}, noContent204=${sawNoContentStatus}). ` +
+          `Likely anti-bot block or slow load.`
+      );
+    }
 
     if (parsedText.events.length > 0 || !sawNoContentStatus) return parsedText;
     return {
@@ -781,7 +908,7 @@ async function waitForUpsResult(
   page: import('puppeteer').Page,
   jsonPayloads: unknown[],
   trackingNumber: string,
-  timeoutMs = 18000
+  timeoutMs = 25000
 ) {
   const started = Date.now();
   const normalized = normalizeTrackingNumber(trackingNumber);
