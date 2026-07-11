@@ -11,7 +11,12 @@ import {
 } from '@/lib/services/carriers';
 import type { Carrier } from '@/lib/services/carriers';
 
-let bot: Telegraf | null = null;
+const globalForTelegram = globalThis as typeof globalThis & {
+  packageTrackerBot?: Telegraf;
+  packageTrackerBotLaunching?: boolean;
+};
+
+let bot: Telegraf | null = globalForTelegram.packageTrackerBot ?? null;
 let chatId: string | null = null;
 
 type AddState =
@@ -24,6 +29,22 @@ type EditState =
 
 const addSessions = new Map<string, AddState>();
 const editSessions = new Map<string, EditState>();
+
+function launchBotWithRetry(instance: Telegraf, attempt = 1) {
+  globalForTelegram.packageTrackerBotLaunching = true;
+  instance
+    .launch(() => {
+      console.log('Telegram bot started (polling mode)');
+    })
+    .catch((err) => {
+      const delayMs = Math.min(60_000, 5_000 * attempt);
+      console.error(
+        `Telegram bot failed to start; retrying in ${Math.round(delayMs / 1000)}s:`,
+        err,
+      );
+      setTimeout(() => launchBotWithRetry(instance, attempt + 1), delayMs);
+    });
+}
 
 function getBot(): Telegraf {
   if (!bot) throw new Error('Bot not started. Call startBot() first.');
@@ -678,7 +699,13 @@ export function startBot() {
     return;
   }
 
+  if (globalForTelegram.packageTrackerBot || globalForTelegram.packageTrackerBotLaunching) {
+    bot = globalForTelegram.packageTrackerBot ?? bot;
+    return;
+  }
+
   bot = new Telegraf(token);
+  globalForTelegram.packageTrackerBot = bot;
 
   bot.use(async (ctx, next) => {
     if (!(await isAuthorized(ctx))) return;
@@ -805,9 +832,7 @@ export function startBot() {
     console.error('Telegram bot error:', err);
   });
 
-  bot.launch(() => {
-    console.log('Telegram bot started (polling mode)');
-  });
+  launchBotWithRetry(bot);
 
   process.once('SIGINT', () => { bot?.stop('SIGINT'); });
   process.once('SIGTERM', () => { bot?.stop('SIGTERM'); });
