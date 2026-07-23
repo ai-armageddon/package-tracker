@@ -14,6 +14,7 @@ import {
   getCarrierHref,
   getCarrierTheme,
 } from "@/components/carrier-brand";
+import { StatusPill } from "@/components/status-pill";
 
 interface TrackingItem {
   id: string;
@@ -57,6 +58,30 @@ const MAX_BULK_FILE_SIZE = 1024 * 1024;
 const BULK_FILE_EXTENSIONS = [".json", ".txt"];
 const NOTE_TEXTAREA_MIN_HEIGHT = 42;
 const NOTE_TEXTAREA_MAX_HEIGHT = 160;
+const INPUT_CLASS =
+  "mt-1.5 w-full rounded-md border border-gray-700/80 bg-gray-800/70 px-3 py-2 text-sm transition-all duration-200 placeholder:text-gray-600 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20";
+const PRIMARY_BUTTON_CLASS =
+  "rounded-md bg-blue-600 px-4 py-2 text-sm font-medium shadow-lg shadow-blue-950/30 transition-all duration-200 hover:bg-blue-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/60 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50";
+const GHOST_BUTTON_CLASS =
+  "rounded-md border border-gray-700/80 bg-gray-800/60 px-3 py-1.5 text-xs font-medium text-gray-300 transition-colors hover:border-gray-600 hover:bg-gray-800 hover:text-gray-100";
+const ACTION_BUTTON_CLASS =
+  "rounded-md px-2 py-1 text-xs font-medium text-gray-500 transition-colors hover:bg-gray-800 hover:text-gray-200";
+
+function formatRelativeTime(value: string) {
+  const date = new Date(value);
+  const diffMs = date.getTime() - Date.now();
+  const absMinutes = Math.abs(diffMs) / 60000;
+  const rtf = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
+
+  if (absMinutes < 1) return "just now";
+  if (absMinutes < 60) return rtf.format(Math.trunc(diffMs / 60000), "minute");
+  if (absMinutes / 60 < 24)
+    return rtf.format(Math.trunc(diffMs / 3600000), "hour");
+  if (absMinutes / 1440 < 30)
+    return rtf.format(Math.trunc(diffMs / 86400000), "day");
+
+  return date.toLocaleDateString();
+}
 
 function getFileExtension(fileName: string) {
   const dotIndex = fileName.lastIndexOf(".");
@@ -570,27 +595,35 @@ export default function HomePage() {
     <>
       {bulkDragActive && (
         <div className="pointer-events-none fixed inset-0 z-40 flex items-center justify-center bg-gray-950/70 px-4 backdrop-blur-sm">
-          <div className="rounded-lg border border-blue-400 bg-gray-900 px-5 py-4 text-center shadow-2xl shadow-blue-950/40">
+          <div className="rounded-xl border border-blue-500/60 bg-gray-900 px-6 py-5 text-center shadow-2xl shadow-blue-950/40">
             <p className="text-sm font-semibold text-blue-200">
               Drop TXT or JSON
+            </p>
+            <p className="mt-1 text-xs text-gray-500">
+              Release to load the file
             </p>
           </div>
         </div>
       )}
       <div className="space-y-8">
       <div
-        className={`bg-gray-900 border border-gray-800 rounded-lg p-6 transition-all duration-500 ${mounted ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"}`}
+        className={`rounded-xl border border-gray-800 bg-gray-900/70 p-6 shadow-xl shadow-black/20 transition-all duration-500 ${mounted ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"}`}
       >
-        <div className="mb-4 flex items-center justify-between gap-4">
-          <h2 className="text-lg font-semibold">Add Tracking Number</h2>
+        <div className="mb-5 flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-base font-semibold">Add Tracking Number</h2>
+            <p className="mt-0.5 text-xs text-gray-500">
+              Paste a number — the carrier is detected automatically.
+            </p>
+          </div>
           <button
             type="button"
             aria-controls="bulk-import-menu"
             aria-expanded={bulkOpen}
             onClick={() => setBulkOpen((open) => !open)}
-            className="rounded bg-gray-800 px-3 py-1.5 text-xs font-medium text-gray-200 transition-colors hover:bg-gray-700"
+            className={`${GHOST_BUTTON_CLASS} shrink-0`}
           >
-            {bulkOpen ? "Close Import" : "Import"}
+            {bulkOpen ? "Close Import" : "Bulk Import"}
           </button>
         </div>
         <form onSubmit={handleAdd} className="space-y-4">
@@ -603,7 +636,8 @@ export default function HomePage() {
                 type="text"
                 value={form.trackingNumber}
                 onChange={(e) => handleTrackingChange(e.target.value)}
-                className="mt-1 w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500 transition-colors duration-200"
+                placeholder="1Z999AA10123456784"
+                className={`${INPUT_CLASS} font-mono placeholder:font-sans`}
               />
             </label>
             <label className="block sm:col-span-2">
@@ -614,7 +648,8 @@ export default function HomePage() {
                 type="text"
                 value={form.title}
                 onChange={(e) => setForm({ ...form, title: e.target.value })}
-                className="mt-1 w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500 transition-colors duration-200"
+                placeholder="e.g. Birthday gift"
+                className={INPUT_CLASS}
               />
             </label>
             <label className="block sm:col-span-4">
@@ -633,14 +668,15 @@ export default function HomePage() {
                   setForm({ ...form, note: e.target.value });
                   resizeAutoTextarea(e.currentTarget);
                 }}
-                className="mt-1 w-full resize-none bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500 transition-colors duration-200"
+                placeholder="Anything worth remembering about this package…"
+                className={`${INPUT_CLASS} resize-none`}
               />
             </label>
             <div className="sm:col-span-4">
               {form.trackingNumber && (
                 <div className="flex items-center gap-3 animate-fade-in flex-wrap">
                   <span className="text-sm text-gray-400">Carrier:</span>
-                  <div className="inline-flex items-center gap-2 rounded border border-gray-700 bg-gray-800 pl-2 transition-colors duration-200 focus-within:border-blue-500">
+                  <div className="inline-flex items-center gap-2 rounded-md border border-gray-700/80 bg-gray-800/70 pl-2 transition-all duration-200 focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-500/20">
                     <CarrierLogo
                       carrier={form.carrier}
                       className="carrier-logo-select"
@@ -686,7 +722,7 @@ export default function HomePage() {
           <button
             type="submit"
             disabled={adding}
-            className="bg-blue-600 hover:bg-blue-700 active:scale-95 disabled:opacity-50 px-4 py-2 rounded text-sm font-medium transition-all duration-200"
+            className={PRIMARY_BUTTON_CLASS}
           >
             {adding ? (
               <span className="inline-flex items-center gap-2">
@@ -702,14 +738,14 @@ export default function HomePage() {
         {bulkOpen && (
           <div
             id="bulk-import-menu"
-            className="mt-5 rounded-lg border border-gray-800 bg-gray-950/55 p-4 shadow-xl animate-fade-in"
+            className="mt-5 rounded-xl border border-gray-800 bg-gray-950/60 p-4 animate-fade-in"
           >
             <form onSubmit={handleBulkImport} className="space-y-4">
               <div
-                className={`rounded border border-dashed p-3 transition-colors ${
+                className={`rounded-lg border border-dashed p-3.5 transition-colors ${
                   bulkDragActive
-                    ? "border-blue-400 bg-blue-500/10"
-                    : "border-gray-700 bg-gray-900/60"
+                    ? "border-blue-400/70 bg-blue-500/10"
+                    : "border-gray-700/80 bg-gray-900/60"
                 }`}
               >
                 <div className="flex flex-wrap items-center justify-between gap-3">
@@ -725,7 +761,7 @@ export default function HomePage() {
                   </div>
                   <label
                     htmlFor="bulk-import-file"
-                    className="cursor-pointer rounded bg-gray-800 px-3 py-2 text-sm font-medium text-gray-200 transition-colors hover:bg-gray-700"
+                    className={`${GHOST_BUTTON_CLASS} cursor-pointer`}
                   >
                     Choose
                   </label>
@@ -754,14 +790,14 @@ export default function HomePage() {
                 rows={5}
                 aria-label="Bulk tracking import"
                 placeholder={`Paste tracking numbers or JSON\n1Z999AA10123456784\n9400100000000000000000`}
-                className="min-h-36 w-full resize-y rounded border border-gray-800 bg-gray-900 px-3 py-3 text-sm text-gray-100 placeholder:text-gray-600 focus:outline-none focus:border-blue-500"
+                className="min-h-36 w-full resize-y rounded-lg border border-gray-800 bg-gray-900/80 px-3 py-3 font-mono text-sm text-gray-100 transition-all duration-200 placeholder:text-gray-600 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
               />
 
               <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="submit"
                   disabled={bulkImporting}
-                  className="bg-blue-600 hover:bg-blue-700 active:scale-95 disabled:opacity-50 px-4 py-2 rounded text-sm font-medium transition-all duration-200"
+                  className={PRIMARY_BUTTON_CLASS}
                 >
                   {bulkImporting ? (
                     <span className="inline-flex items-center gap-2">
@@ -782,7 +818,7 @@ export default function HomePage() {
                       setBulkMessage("");
                       setBulkResults(null);
                     }}
-                    className="rounded bg-gray-800 px-3 py-2 text-sm font-medium text-gray-300 transition-colors hover:bg-gray-700"
+                    className={GHOST_BUTTON_CLASS}
                   >
                     Clear
                   </button>
@@ -823,14 +859,17 @@ export default function HomePage() {
         )}
       </div>
 
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">
-          Tracked Packages ({items.length})
+      <div className="flex items-center justify-between gap-4">
+        <h2 className="flex items-center gap-2.5 text-base font-semibold">
+          Tracked Packages
+          <span className="rounded-full border border-gray-800 bg-gray-900 px-2.5 py-0.5 text-xs font-medium text-gray-400">
+            {items.length}
+          </span>
         </h2>
         <button
           onClick={handleCheck}
           disabled={checking}
-          className="bg-green-700 hover:bg-green-800 active:scale-95 disabled:opacity-50 px-4 py-2 rounded text-sm font-medium transition-all duration-200"
+          className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium shadow-lg shadow-emerald-950/30 transition-all duration-200 hover:bg-emerald-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/60 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50"
         >
           {checking ? (
             <span className="inline-flex items-center gap-2">
@@ -844,14 +883,27 @@ export default function HomePage() {
       </div>
 
       {loading ? (
-        <div className="flex items-center gap-3 text-gray-500">
-          <span className="w-4 h-4 border-2 border-gray-600 border-t-gray-400 rounded-full animate-spin" />
-          Loading...
+        <div className="space-y-3" aria-busy="true" aria-live="polite">
+          {[0, 1, 2].map((i) => (
+            <div
+              key={i}
+              className="rounded-xl border border-gray-800 bg-gray-900/60 p-5"
+            >
+              <div className="skeleton h-3.5 w-40 rounded" />
+              <div className="skeleton mt-3.5 h-3 w-2/3 max-w-xs rounded" />
+              <div className="skeleton mt-3 h-3 w-24 rounded" />
+            </div>
+          ))}
         </div>
       ) : items.length === 0 ? (
-        <p className="text-gray-500 animate-fade-in">
-          No tracking numbers yet. Add one above.
-        </p>
+        <div className="rounded-xl border border-dashed border-gray-800 bg-gray-900/40 px-6 py-12 text-center animate-fade-in">
+          <div className="mb-3 text-3xl opacity-80">📭</div>
+          <p className="text-sm font-medium text-gray-300">No packages yet</p>
+          <p className="mx-auto mt-1 max-w-sm text-xs leading-relaxed text-gray-500">
+            Add your first tracking number above, or drop a TXT/JSON file
+            anywhere on this page to import in bulk.
+          </p>
+        </div>
       ) : (
         <div className="space-y-3">
           {items.map((item, i) => {
@@ -861,15 +913,15 @@ export default function HomePage() {
             return (
               <div
                 key={item.id}
-                className={`carrier-card bg-gray-900 border border-l-2 rounded-lg p-5 transition-all duration-300 hover:border-gray-500 ${
-                  item.active ? "border-gray-700" : "border-gray-800 opacity-50"
-                } ${isChecked ? "ring-1 ring-green-500/30 border-green-600/40" : ""} ${itemTheme.cardClass}`}
+                className={`carrier-card rounded-xl border border-l-2 bg-gray-900/70 p-5 shadow-lg shadow-black/10 hover:border-gray-600 hover:shadow-black/25 ${
+                  item.active ? "border-gray-700/90" : "border-gray-800 opacity-50"
+                } ${isChecked ? "ring-1 ring-emerald-500/30 border-emerald-600/40" : ""} ${itemTheme.cardClass}`}
                 style={{
                   opacity: mounted ? (item.active ? 1 : 0.5) : 0,
                   transform: mounted ? "translateY(0)" : "translateY(12px)",
                   transitionDelay: `${i * 60}ms`,
                   transitionDuration: "400ms",
-                  transitionProperty: "opacity, transform",
+                  transitionProperty: "opacity, transform, border-color, box-shadow",
                   transitionTimingFunction: "ease-out",
                 }}
               >
@@ -885,7 +937,7 @@ export default function HomePage() {
                         onChange={(e) =>
                           setEditForm({ ...editForm, title: e.target.value })
                         }
-                        className="mt-1 bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm w-full focus:outline-none focus:border-blue-500 transition-colors"
+                        className={INPUT_CLASS}
                       />
                     </label>
                     <label className="block">
@@ -907,19 +959,19 @@ export default function HomePage() {
                           });
                           resizeAutoTextarea(e.currentTarget);
                         }}
-                        className="mt-1 bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm w-full resize-none focus:outline-none focus:border-blue-500 transition-colors"
+                        className={`${INPUT_CLASS} resize-none`}
                       />
                     </label>
                     <div className="flex gap-2">
                       <button
                         onClick={handleSaveEdit}
-                        className="bg-blue-600 hover:bg-blue-700 active:scale-95 px-3 py-1 rounded text-xs transition-all duration-150"
+                        className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium transition-all duration-150 hover:bg-blue-500 active:scale-95"
                       >
                         Save
                       </button>
                       <button
                         onClick={() => setEditId(null)}
-                        className="bg-gray-700 hover:bg-gray-600 active:scale-95 px-3 py-1 rounded text-xs transition-all duration-150"
+                        className={GHOST_BUTTON_CLASS}
                       >
                         Cancel
                       </button>
@@ -946,82 +998,83 @@ export default function HomePage() {
                               href={itemHref}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="text-xs bg-gray-800 hover:bg-gray-700 px-2 py-0.5 rounded text-gray-400 hover:text-blue-300 transition-colors underline decoration-gray-600 hover:decoration-blue-400"
+                              className="rounded-md border border-gray-700/60 bg-gray-800/70 px-1.5 py-0.5 font-mono text-[11px] text-gray-400 transition-colors hover:border-gray-600 hover:text-blue-300"
                             >
                               {item.trackingNumber}
                             </a>
                           )}
                         </div>
                         {item.note && (
-                          <p className="text-sm text-gray-500 mt-1">
+                          <p className="text-sm text-gray-400 mt-1.5">
                             {item.note}
                           </p>
                         )}
                         {item.lastStatus && (
-                          <div className="mt-2 text-sm">
-                            <span
-                              className={`${itemTheme.statusTextClass} font-medium`}
-                            >
-                              {item.lastStatus}
-                            </span>
+                          <div className="mt-2.5 flex flex-wrap items-center gap-x-2 gap-y-1.5">
+                            <StatusPill status={item.lastStatus} />
                             {item.lastDetail && (
-                              <span className="text-gray-500 ml-2">
-                                — {item.lastDetail}
+                              <span className="text-[13px] text-gray-500">
+                                {item.lastDetail}
                               </span>
                             )}
                           </div>
                         )}
-                        {item.lastLocation && (
-                          <p className="text-xs text-gray-600 mt-0.5">
-                            {item.lastLocation}
-                          </p>
-                        )}
-                        {item.lastStatusDate && (
-                          <p className="text-xs text-gray-600 mt-0.5">
-                            {new Date(item.lastStatusDate).toLocaleDateString()}{" "}
-                            {new Date(item.lastStatusDate).toLocaleTimeString(
-                              [],
-                              {
-                                hour: "2-digit",
-                                minute: "2-digit",
-                              },
+                        {(item.lastLocation || item.lastStatusDate) && (
+                          <p className="mt-1.5 flex flex-wrap items-center gap-x-1.5 text-xs text-gray-500">
+                            {item.lastLocation && (
+                              <span>{item.lastLocation}</span>
+                            )}
+                            {item.lastLocation && item.lastStatusDate && (
+                              <span aria-hidden="true" className="text-gray-700">
+                                •
+                              </span>
+                            )}
+                            {item.lastStatusDate && (
+                              <time
+                                dateTime={item.lastStatusDate}
+                                title={new Date(
+                                  item.lastStatusDate,
+                                ).toLocaleString()}
+                              >
+                                {formatRelativeTime(item.lastStatusDate)}
+                              </time>
                             )}
                           </p>
                         )}
                         {isChecked && (
-                          <div className="flex items-center gap-2 mt-2 text-green-400 animate-fade-in">
-                            <span className="w-3 h-3 border-2 border-green-400/30 border-t-green-400 rounded-full animate-spin" />
-                            <span className="text-xs font-medium">
+                          <div className="mt-2.5 inline-flex items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-emerald-300 animate-fade-in">
+                            <span className="h-2.5 w-2.5 animate-spin rounded-full border-2 border-emerald-400/30 border-t-emerald-300" />
+                            <span className="text-[11px] font-medium">
                               Checking...
                             </span>
                           </div>
                         )}
                       </div>
-                      <div className="flex items-center gap-2 shrink-0">
+                      <div className="flex shrink-0 flex-wrap items-center justify-end gap-0.5">
                         <Link
                           href={`/history/${item.id}`}
-                          className="text-xs text-blue-400 hover:text-blue-300 transition-colors"
+                          className={ACTION_BUTTON_CLASS}
                         >
                           History
                         </Link>
                         <button
                           onClick={() => startEdit(item)}
-                          className="text-xs text-gray-400 hover:text-gray-300 transition-colors"
+                          className={ACTION_BUTTON_CLASS}
                         >
                           Edit
                         </button>
                         <button
                           onClick={() => handleCheckItem(item.id)}
                           disabled={isChecked}
-                          className={`text-xs transition-colors ${
+                          className={`${ACTION_BUTTON_CLASS} ${
                             isChecked
-                              ? "text-green-400"
-                              : "text-green-500 hover:text-green-400"
+                              ? "text-emerald-400"
+                              : "hover:bg-emerald-500/10 hover:text-emerald-300"
                           }`}
                         >
                           {isChecked ? (
                             <span className="inline-flex items-center gap-1">
-                              <span className="w-2.5 h-2.5 border-2 border-green-400/30 border-t-green-400 rounded-full animate-spin" />
+                              <span className="w-2.5 h-2.5 border-2 border-emerald-400/30 border-t-emerald-300 rounded-full animate-spin" />
                             </span>
                           ) : (
                             "Check"
@@ -1029,17 +1082,17 @@ export default function HomePage() {
                         </button>
                         <button
                           onClick={() => handleToggle(item)}
-                          className={`text-xs transition-colors ${
+                          className={`${ACTION_BUTTON_CLASS} ${
                             item.active
-                              ? "text-yellow-400 hover:text-yellow-300"
-                              : "text-green-400 hover:text-green-300"
+                              ? "hover:bg-amber-500/10 hover:text-amber-300"
+                              : "hover:bg-emerald-500/10 hover:text-emerald-300"
                           }`}
                         >
                           {item.active ? "Pause" : "Resume"}
                         </button>
                         <button
                           onClick={() => handleDelete(item.id)}
-                          className="text-xs text-red-400 hover:text-red-300 transition-colors"
+                          className={`${ACTION_BUTTON_CLASS} hover:bg-red-500/10 hover:text-red-300`}
                         >
                           Delete
                         </button>

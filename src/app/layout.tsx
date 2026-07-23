@@ -28,37 +28,34 @@ export default async function RootLayout({
 
   return (
     <html lang="en">
-      <body className="bg-gray-950 text-gray-100 min-h-screen flex flex-col">
-        <header className="border-b border-gray-800 bg-gray-900">
-          <div className="max-w-4xl mx-auto px-4 py-4 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <span className="text-2xl">📦</span>
-              <h1 className="text-xl font-bold tracking-tight">
-                Package Tracking
-              </h1>
-              <div className="flex items-center gap-2">
-                <svg viewBox="0 0 72 24" className="h-5 w-auto" aria-label="USPS">
-                  <rect width="72" height="24" rx="5" fill="#004B87"/>
-                  <text x="36" y="16.5" textAnchor="middle" fontFamily="Arial,Helvetica,sans-serif" fontWeight="900" fontSize="12.5" fill="white" letterSpacing="1">USPS</text>
-                </svg>
-                <svg viewBox="0 0 86 24" className="h-5 w-auto" aria-label="FedEx">
-                  <rect width="86" height="24" rx="5" fill="#2D1B4E"/>
-                  <text x="43" y="17" textAnchor="middle" fontFamily="'Arial Black',Arial,Helvetica,sans-serif" fontWeight="900" fontSize="14"><tspan fill="#A855F7">Fed</tspan><tspan fill="#FF6600">Ex</tspan></text>
-                </svg>
-                <svg viewBox="0 0 72 24" className="h-5 w-auto" aria-label="UPS">
-                  <rect width="72" height="24" rx="5" fill="#351C15"/>
-                  <text x="36" y="16.5" textAnchor="middle" fontFamily="Arial,Helvetica,sans-serif" fontWeight="900" fontSize="12.5" fill="#FFB500" letterSpacing="1">UPS</text>
-                </svg>
+      <body className="bg-gray-950 text-gray-100 min-h-screen flex flex-col antialiased">
+        <header className="sticky top-0 z-30 border-b border-gray-800/70 bg-gray-950/80 backdrop-blur-md">
+          <div className="max-w-4xl mx-auto px-4 py-3.5 flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3 min-w-0">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-700/60 bg-gradient-to-br from-blue-500/25 via-gray-900 to-purple-500/20 text-lg shadow-inner">
+                📦
+              </span>
+              <div className="min-w-0">
+                <h1 className="text-[15px] font-semibold leading-tight tracking-tight">
+                  Package Tracking
+                </h1>
+                <p className="text-[11px] leading-tight text-gray-500">
+                  USPS · FedEx · UPS
+                </p>
               </div>
             </div>
             <div className="flex items-center gap-3">
-              <span className="text-xs font-mono text-[#A855F7]">{getVersion()}</span>
-              <span className="text-xs text-gray-500">via Telegram</span>
+              <span className="hidden text-xs text-gray-500 sm:inline">
+                Telegram alerts
+              </span>
+              <span className="rounded-full border border-purple-500/25 bg-purple-500/10 px-2 py-0.5 font-mono text-[11px] text-purple-300/90">
+                {getVersion()}
+              </span>
               {signedIn && (
                 <form action="/api/auth/logout" method="post">
                   <button
                     type="submit"
-                    className="text-xs text-gray-400 hover:text-gray-100 border border-gray-700 hover:border-gray-500 rounded px-2 py-1 transition-colors"
+                    className="rounded-md border border-gray-700/80 px-2.5 py-1 text-xs font-medium text-gray-400 transition-colors hover:border-gray-600 hover:text-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50"
                   >
                     Sign out
                   </button>
@@ -67,8 +64,8 @@ export default async function RootLayout({
             </div>
           </div>
         </header>
-        <main className="max-w-4xl mx-auto px-4 py-8 flex-1">{children}</main>
-        <footer className="border-t border-gray-800 mt-auto">
+        <main className="max-w-4xl mx-auto w-full px-4 py-8 flex-1">{children}</main>
+        <footer className="border-t border-gray-800/70 mt-auto">
           <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between text-xs text-gray-600">
             <span>&copy; {new Date().getFullYear()} ai-armageddon</span>
             <a href="https://github.com/ai-armageddon/package-tracker" target="_blank" rel="noopener noreferrer" className="text-gray-500 hover:text-gray-300 transition-colors">

@@ -9,6 +9,11 @@ export function isCarrier(value: string): value is Carrier {
   return CARRIERS.includes(value as Carrier);
 }
 
+export function isUspsInternationalTrackingNumber(tn: string): boolean {
+  const cleaned = normalizeTrackingNumber(tn);
+  return /^[A-Z]{2}\d{9}[A-Z]{2}$/.test(cleaned);
+}
+
 function isUpsTrackingNumber(tn: string): boolean {
   const cleaned = normalizeTrackingNumber(tn);
   return (
@@ -46,7 +51,13 @@ export const CARRIER_CONFIG: Record<Carrier, CarrierConfig> = {
       `https://tools.usps.com/tracking/${encodeURIComponent(tn)}`,
     homeUrl: "https://www.usps.com",
     favicon: "https://www.usps.com/favicon.ico",
-    validate: (tn) => /^\d{20,22}$/.test(normalizeTrackingNumber(tn)),
+    validate: (tn) => {
+      const cleaned = normalizeTrackingNumber(tn);
+      return (
+        /^\d{20,22}$/.test(cleaned) ||
+        isUspsInternationalTrackingNumber(cleaned)
+      );
+    },
   },
   FedEx: {
     name: "FedEx",

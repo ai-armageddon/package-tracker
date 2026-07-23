@@ -36,7 +36,7 @@ async function scrapePage(
     const allLines = body.split('\n').map((l) => l.trim()).filter(Boolean);
 
     const latestUpdateStopRe =
-      /^(Get More Out of USPS Tracking:?|USPS Tracking Plus(?:®)?|Text & Email Updates|Product Information|See Less|Track Another Package|What Do USPS Tracking Statuses Mean\??|Need More Help\??|FAQs)$/i;
+      /^(Get More Out of USPS Tracking:?|USPS Tracking Plus(?:®)?|Text & Email Updates|Product Information|See Less|See All Tracking History|Track Another Package|What Do USPS Tracking Statuses Mean\??|Need More Help\??|FAQs|USPS Awaiting Item|On the Way|Moving Through Network|Out for Delivery|Delivered|Origin Post is Preparing Shipment|Processed Through Facility)$/i;
     const latestUpdateIndex = allLines.findIndex((line) =>
       /^Latest Update$/i.test(line)
     );
@@ -120,6 +120,7 @@ async function scrapePage(
       'Moving Through Network', 'In Transit, Arriving Late',
       'Pre-Shipment Info Sent to USPS, USPS Awaiting Item',
       'USPS Awaiting Item', 'Arrived Shipping Partner Facility',
+      'Origin Post is Preparing Shipment', 'Processed Through Facility',
       'Arrived Shipping Partner Facility, USPS Awaiting Item',
       'Departed Shipping Partner Facility',
       'Departed Shipping Partner Facility, USPS Awaiting Item',

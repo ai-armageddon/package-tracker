@@ -1,12 +1,13 @@
 import { Telegraf, Context } from 'telegraf';
 import { message } from 'telegraf/filters';
 import { prisma } from '@/lib/db/prisma';
-import { checkTracking } from '@/lib/services/usps';
+import { checkTracking, type TrackingResult } from '@/lib/services/usps';
 import { checkFedExTracking } from '@/lib/services/fedex';
 import { checkUpsTracking } from '@/lib/services/ups';
 import {
   CARRIER_CONFIG,
   detectCarrier,
+  isUspsInternationalTrackingNumber,
   resolveCarrier,
 } from '@/lib/services/carriers';
 import type { Carrier } from '@/lib/services/carriers';
@@ -21,8 +22,18 @@ let chatId: string | null = null;
 
 type AddState =
   | { step: 'awaiting_carrier'; trackingNumber: string }
-  | { step: 'awaiting_title_yn'; trackingNumber: string; carrier: Carrier }
-  | { step: 'awaiting_title'; trackingNumber: string; carrier: Carrier };
+  | {
+      step: 'awaiting_title_yn';
+      trackingNumber: string;
+      carrier: Carrier;
+      prefetchedTracking?: TrackingResult;
+    }
+  | {
+      step: 'awaiting_title';
+      trackingNumber: string;
+      carrier: Carrier;
+      prefetchedTracking?: TrackingResult;
+    };
 
 type EditState =
   | { step: 'awaiting_title'; itemId: string; trackingNumber: string; oldTitle: string | null };
@@ -75,7 +86,11 @@ function carrierBadge(carrier: string): string {
   return '🔵';
 }
 
-async function fetchAndSaveTracking(tn: string, carrier: Carrier): Promise<string> {
+async function fetchAndSaveTracking(
+  tn: string,
+  carrier: Carrier,
+  prefetchedTracking?: TrackingResult
+): Promise<string> {
   try {
     const scraper =
       carrier === 'FedEx'
@@ -83,7 +98,7 @@ async function fetchAndSaveTracking(tn: string, carrier: Carrier): Promise<strin
         : carrier === 'UPS'
           ? checkUpsTracking
           : checkTracking;
-    const results = await scraper([tn]);
+    const results = prefetchedTracking ? [prefetchedTracking] : await scraper([tn]);
     const r = results[0];
     if (!r || !r.events.length) return '';
 
@@ -132,9 +147,41 @@ async function fetchAndSaveTracking(tn: string, carrier: Carrier): Promise<strin
     if (latest.detail) parts.push(`📋 ${escapeHtml(latest.detail)}`);
     if (latest.location) parts.push(`📍 ${escapeHtml(latest.location)}`);
     return parts.join('\n');
-  } catch {
+  } catch (err) {
+    console.error(`[fetchAndSaveTracking] ${carrier} ${tn} failed:`, err);
     return '';
   }
+}
+
+function hasUspsTrackingData(result: TrackingResult | undefined): result is TrackingResult {
+  if (!result) return false;
+  if (result.events.length > 0) return true;
+  const summary = result.summary.trim();
+  return Boolean(summary) && !/^(?:unknown|not found|status not available)$/i.test(summary);
+}
+
+async function verifyUspsInternationalHandoff(
+  trackingNumber: string,
+  carrier: Carrier
+): Promise<TrackingResult | undefined | null> {
+  if (carrier !== 'USPS' || !isUspsInternationalTrackingNumber(trackingNumber)) {
+    return undefined;
+  }
+
+  try {
+    const result = (await checkTracking([trackingNumber]))[0];
+    return hasUspsTrackingData(result) ? result : null;
+  } catch (err) {
+    console.error(`[verifyUspsInternationalHandoff] USPS ${trackingNumber} failed:`, err);
+    return null;
+  }
+}
+
+async function replyNoUspsTrackingData(ctx: Context, trackingNumber: string) {
+  await ctx.reply(
+    `USPS did not return tracking data for <code>${escapeHtml(trackingNumber)}</code>. Check the number or try /add again later.`,
+    { parse_mode: 'HTML' }
+  );
 }
 
 function levenshtein(a: string, b: string): number {
@@ -327,9 +374,15 @@ async function handleAdd(ctx: Context, args: string) {
 
   if (!CARRIER_CONFIG[carrier].validate(trackingNumber)) {
     await ctx.reply(
-      `Invalid ${carrier} tracking number format.\nUSPS: 20–22 digits\nFedEx: 12+ digits or DT+12 digits\nUPS: 1Z + 16 letters/digits`,
+      `Invalid ${carrier} tracking number format.\nUSPS: 20–22 digits or international AA123456789AA\nFedEx: 12+ digits or DT+12 digits\nUPS: 1Z + 16 letters/digits`,
       { parse_mode: 'HTML' }
     );
+    return;
+  }
+
+  const prefetchedTracking = await verifyUspsInternationalHandoff(trackingNumber, carrier);
+  if (prefetchedTracking === null) {
+    await replyNoUspsTrackingData(ctx, trackingNumber);
     return;
   }
 
@@ -349,7 +402,7 @@ async function handleAdd(ctx: Context, args: string) {
     await prisma.trackingItem.create({
       data: { trackingNumber, carrier, title: maybeTitle, note: null },
     });
-    const summary = await fetchAndSaveTracking(trackingNumber, carrier);
+    const summary = await fetchAndSaveTracking(trackingNumber, carrier, prefetchedTracking);
     await ctx.reply(
       `✅ Added: <b>${escapeHtml(maybeTitle)}</b>\n${carrierBadge(carrier)} ${trackingLink(trackingNumber, carrier)}${summary ? '\n\n' + summary : ''}`,
       { parse_mode: 'HTML' }
@@ -358,7 +411,12 @@ async function handleAdd(ctx: Context, args: string) {
     return;
   }
 
-  addSessions.set(String(ctx.chat!.id), { step: 'awaiting_title_yn', trackingNumber, carrier });
+  addSessions.set(String(ctx.chat!.id), {
+    step: 'awaiting_title_yn',
+    trackingNumber,
+    carrier,
+    prefetchedTracking,
+  });
   await ctx.reply(
     `${carrierBadge(carrier)} ${trackingLink(trackingNumber, carrier)} — Add a title? (Y/N)`,
     { parse_mode: 'HTML' }
@@ -384,10 +442,19 @@ async function handleAddState(ctx: Context, text: string): Promise<boolean> {
       );
       return true;
     }
+
+    const prefetchedTracking = await verifyUspsInternationalHandoff(session.trackingNumber, carrier);
+    if (prefetchedTracking === null) {
+      addSessions.delete(cid);
+      await replyNoUspsTrackingData(ctx, session.trackingNumber);
+      return true;
+    }
+
     addSessions.set(cid, {
       step: 'awaiting_title_yn',
       trackingNumber: session.trackingNumber,
       carrier,
+      prefetchedTracking,
     });
     await ctx.reply(
       `${carrierBadge(carrier)} ${trackingLink(session.trackingNumber, carrier)} — Add a title? (Y/N)`,
@@ -403,6 +470,7 @@ async function handleAddState(ctx: Context, text: string): Promise<boolean> {
         step: 'awaiting_title',
         trackingNumber: session.trackingNumber,
         carrier: session.carrier,
+        prefetchedTracking: session.prefetchedTracking,
       });
       await ctx.reply('Enter title:');
       return true;
@@ -412,7 +480,11 @@ async function handleAddState(ctx: Context, text: string): Promise<boolean> {
       await prisma.trackingItem.create({
         data: { trackingNumber: session.trackingNumber, carrier: session.carrier, title: null, note: null },
       });
-      const summary = await fetchAndSaveTracking(session.trackingNumber, session.carrier);
+      const summary = await fetchAndSaveTracking(
+        session.trackingNumber,
+        session.carrier,
+        session.prefetchedTracking
+      );
       await ctx.reply(
         `✅ Added: ${carrierBadge(session.carrier)} ${trackingLink(session.trackingNumber, session.carrier)}${summary ? '\n\n' + summary : ''}`,
         { parse_mode: 'HTML' }
@@ -431,7 +503,11 @@ async function handleAddState(ctx: Context, text: string): Promise<boolean> {
       data: { trackingNumber: session.trackingNumber, carrier: session.carrier, title, note: null },
     });
     const label = title || session.trackingNumber;
-    const summary = await fetchAndSaveTracking(session.trackingNumber, session.carrier);
+    const summary = await fetchAndSaveTracking(
+      session.trackingNumber,
+      session.carrier,
+      session.prefetchedTracking
+    );
     await ctx.reply(
       `✅ Added: <b>${escapeHtml(label)}</b>\n${carrierBadge(session.carrier)} ${trackingLink(session.trackingNumber, session.carrier)}${summary ? '\n\n' + summary : ''}`,
       { parse_mode: 'HTML' }

@@ -7,6 +7,7 @@ import {
   CarrierLogo,
   getCarrierTheme,
 } from "@/components/carrier-brand";
+import { StatusPill } from "@/components/status-pill";
 
 interface StatusEvent {
   id: string;
@@ -82,9 +83,9 @@ export default function HistoryPage() {
       >
         <button
           onClick={() => router.push("/")}
-          className="text-sm text-blue-400 hover:text-blue-300 transition-colors"
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-gray-800 bg-gray-900/70 px-2.5 py-1.5 text-xs font-medium text-gray-400 transition-colors hover:border-gray-600 hover:text-gray-100"
         >
-          &larr; Back
+          <span aria-hidden="true">&larr;</span> Back
         </button>
         <CarrierLogo carrier={data.carrier} className="carrier-logo-page" />
         <div className="min-w-0">
@@ -95,7 +96,7 @@ export default function HistoryPage() {
             <CarrierBadge carrier={data.carrier} />
           </div>
           {data.title && (
-            <code className="text-xs bg-gray-800 px-2 py-0.5 rounded text-gray-400">
+            <code className="mt-1 inline-block rounded-md border border-gray-700/60 bg-gray-800/70 px-1.5 py-0.5 font-mono text-[11px] text-gray-400">
               {data.trackingNumber}
             </code>
           )}
@@ -106,9 +107,15 @@ export default function HistoryPage() {
       </div>
 
       {data.statusHistory.length === 0 ? (
-        <p className="text-gray-500 animate-fade-in">
-          No status events recorded yet.
-        </p>
+        <div className="rounded-xl border border-dashed border-gray-800 bg-gray-900/40 px-6 py-12 text-center animate-fade-in">
+          <div className="mb-3 text-3xl opacity-80">🚚</div>
+          <p className="text-sm font-medium text-gray-300">
+            No status events yet
+          </p>
+          <p className="mx-auto mt-1 max-w-sm text-xs leading-relaxed text-gray-500">
+            Events will appear here the next time this package is checked.
+          </p>
+        </div>
       ) : (
         <div
           className={`relative pl-6 border-l ${carrierTheme.historyBorderClass} space-y-6`}
@@ -134,25 +141,21 @@ export default function HistoryPage() {
                 }`}
               />
               <div
-                className={`bg-gray-900 border border-gray-800 rounded-lg p-4 transition-colors hover:border-gray-700 ${carrierTheme.historyCardClass}`}
+                className={`rounded-xl border border-gray-800 bg-gray-900/70 p-4 shadow-md shadow-black/10 transition-colors hover:border-gray-700 ${carrierTheme.historyCardClass}`}
               >
                 <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <span
-                      className={`font-medium ${carrierTheme.statusTextClass}`}
-                    >
-                      {event.status}
-                    </span>
-                    <p className="text-sm text-gray-400 mt-1 whitespace-pre-wrap">
+                  <div className="min-w-0">
+                    <StatusPill status={event.status} />
+                    <p className="text-sm text-gray-400 mt-2 whitespace-pre-wrap">
                       {event.detail}
                     </p>
                     {event.location && (
-                      <p className="text-xs text-gray-600 mt-1">
+                      <p className="text-xs text-gray-500 mt-1.5">
                         {event.location}
                       </p>
                     )}
                   </div>
-                  <div className="text-xs text-gray-600 text-right shrink-0">
+                  <div className="text-right text-[11px] leading-relaxed text-gray-500 shrink-0">
                     <div>{event.eventDate}</div>
                     <div>{event.eventTime}</div>
                   </div>
