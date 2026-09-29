@@ -2,6 +2,7 @@ import { prisma } from '@/lib/db/prisma';
 import { isCarrier, type Carrier } from '@/lib/services/carriers';
 import { checkFedExTracking } from '@/lib/services/fedex';
 import { checkUpsTracking } from '@/lib/services/ups';
+import { checkUniUniTracking } from '@/lib/services/uniuni';
 import { checkTracking, type TrackingResult } from '@/lib/services/usps';
 
 type TrackingItemRef = {
@@ -10,9 +11,10 @@ type TrackingItemRef = {
   carrier: string;
 };
 
-function getTrackingScraper(carrier: Carrier) {
+export function getTrackingScraper(carrier: Carrier) {
   if (carrier === 'FedEx') return checkFedExTracking;
   if (carrier === 'UPS') return checkUpsTracking;
+  if (carrier === 'UniUni') return checkUniUniTracking;
   return checkTracking;
 }
 

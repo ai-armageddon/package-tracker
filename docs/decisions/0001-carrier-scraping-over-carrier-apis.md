@@ -5,7 +5,7 @@
 
 ## Context
 
-Package Tracker tracks USPS, FedEx, and UPS packages from a web UI and Telegram bot. The app currently advertises no required carrier API keys, auto-detects common carrier tracking-number formats, performs scheduled checks, and sends Telegram notifications only when package status changes.
+Package Tracker tracks USPS, FedEx, UPS, and UniUni packages from a web UI and Telegram bot. The app currently advertises no required carrier API keys, auto-detects common carrier tracking-number formats, performs scheduled checks, and sends Telegram notifications only when package status changes.
 
 Carrier APIs would provide a cleaner integration surface, but they add account setup, approval flows, key management, rate limits, carrier-specific commercial requirements, and extra deployment configuration. For a small personal/internal tracker, that overhead is higher than the current product needs.
 
@@ -13,7 +13,7 @@ The repo already has a scraping-oriented architecture using Puppeteer and a stea
 
 ## Decision
 
-Continue using carrier tracking-page scraping as the primary data source for USPS, FedEx, and UPS.
+Continue using carrier tracking-page scraping as the primary data source for USPS, FedEx, UPS, and UniUni.
 
 Keep the abstraction carrier-specific, with one service per carrier responsible for:
 
@@ -31,7 +31,7 @@ Do not introduce carrier API integrations until scraping instability, scale, or 
 
 - No carrier API keys or approval workflow required.
 - Faster setup for local use and private deployment.
-- Same user flow across USPS, FedEx, and UPS.
+- Same user flow across USPS, FedEx, UPS, and UniUni.
 - Easier to support user-provided tracking numbers without account-level carrier setup.
 - Keeps the product lightweight and aligned with the current personal/package-monitoring use case.
 

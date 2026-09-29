@@ -39,6 +39,10 @@ function detectCarrierForLooseInput(tn: string): Carrier | null {
   const cleaned = normalizeTrackingNumber(tn);
   if (!cleaned) return null;
 
+  if (/^UUS[0-9A-Z]{0,37}$/.test(cleaned)) {
+    return "UniUni";
+  }
+
   if (
     /^1Z[0-9A-Z]{0,16}$/.test(cleaned) ||
     /^T\d{0,10}$/.test(cleaned) ||

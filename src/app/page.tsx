@@ -115,6 +115,7 @@ function looksLikeTrackingPaste(text: string) {
 
   const upper = trimmed.toUpperCase();
   return [
+    /UUS[0-9A-Z\s-]{8,37}/,
     /1Z[0-9A-Z\s-]{16,24}/,
     /DT[\s-]?\d{12}/,
     /T[\s-]?\d{10}/,
@@ -179,6 +180,10 @@ function validateBulkFileText(file: File, text: string) {
 function detectCarrierForInput(tn: string): Carrier | null {
   const cleaned = normalizeTrackingNumber(tn);
   if (!cleaned) return null;
+
+  if (/^UUS[0-9A-Z]{0,37}$/.test(cleaned)) {
+    return "UniUni";
+  }
 
   if (
     /^1Z[0-9A-Z]{0,16}$/.test(cleaned) ||

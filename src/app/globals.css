@@ -193,6 +193,16 @@
     box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.08);
   }
 
+  .carrier-badge-uniuni {
+    border-color: rgb(234 88 12 / 0.75);
+    background: linear-gradient(
+      135deg,
+      rgb(124 45 18 / 0.48),
+      rgb(249 115 22 / 0.14)
+    );
+    color: rgb(253 186 116);
+  }
+
   .carrier-card {
     position: relative;
     overflow: hidden;
@@ -260,6 +270,18 @@
     animation: carrierUpsSheen 5.5s ease-in-out infinite;
   }
 
+  .carrier-card.carrier-card-uniuni {
+    border-left-color: rgb(249 115 22 / 0.72);
+    background-image: linear-gradient(
+      110deg,
+      rgb(154 52 18 / 0.25),
+      rgb(249 115 22 / 0.09),
+      transparent 70%
+    );
+    background-size: 200% 100%;
+    animation: carrierGradientPan 8s ease-in-out infinite;
+  }
+
   .carrier-detected-default {
     border-color: rgb(55 65 81);
     background: rgb(31 41 55);
@@ -288,6 +310,12 @@
     color: rgb(253 224 119 / 0.82);
   }
 
+  .carrier-detected-uniuni {
+    border-color: rgb(234 88 12 / 0.4);
+    background: rgb(124 45 18 / 0.22);
+    color: rgb(253 186 116 / 0.85);
+  }
+
   .carrier-history-border-default {
     border-left-color: rgb(75 85 99);
   }
@@ -302,6 +330,10 @@
 
   .carrier-history-border-ups {
     border-left-color: rgb(180 104 36 / 0.42);
+  }
+
+  .carrier-history-border-uniuni {
+    border-left-color: rgb(249 115 22 / 0.36);
   }
 
   .carrier-history-card-default {
@@ -335,6 +367,15 @@
     animation: carrierGradientPan 9s ease-in-out infinite;
   }
 
+  .carrier-history-card-uniuni {
+    background-image: linear-gradient(
+      to right,
+      rgb(124 45 18 / 0.22),
+      rgb(249 115 22 / 0.06),
+      transparent
+    );
+  }
+
   .carrier-timeline-dot-default {
     border-color: rgb(107 114 128);
     background: rgb(107 114 128);
@@ -354,6 +395,12 @@
     border-color: rgb(120 63 26);
     background: rgb(246 190 0);
     box-shadow: 0 0 16px rgb(246 190 0 / 0.28);
+  }
+
+  .carrier-timeline-dot-uniuni {
+    border-color: rgb(194 65 12);
+    background: rgb(249 115 22);
+    box-shadow: 0 0 16px rgb(249 115 22 / 0.25);
   }
 }
 

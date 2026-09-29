@@ -1,10 +1,10 @@
 # Package Tracker
 
-Track USPS, FedEx, and UPS packages — get Telegram notifications when status changes. No API keys required.
+Track USPS, FedEx, UPS, and UniUni packages — get Telegram notifications when status changes. No API keys required.
 
 ## Features
 
-- Track USPS, FedEx, and UPS packages via web UI or Telegram bot
+- Track USPS, FedEx, UPS, and UniUni packages via web UI or Telegram bot
 - Auto-detect carrier from tracking number format, including common UPS formats like `1Z...`, `T` + 10 digits, 9 digits, and 12 digits
 - Automatic status checks on a configurable interval (default: 15 min)
 - Telegram notifications only when a package's status actually changes — no duplicate pings
@@ -54,7 +54,7 @@ Open http://localhost:3000 for the web UI, or message your bot on Telegram.
 |---|---|
 | `/list` | List all packages with index, status, carrier, and clickable tracking numbers |
 | `/add <tracking> [title]` | Add a package (auto-detects carrier by format) |
-| `/add usps\|fedex\|ups <tracking> [title]` | Add with explicit carrier |
+| `/add usps\|fedex\|ups\|uniuni <tracking> [title]` | Add with explicit carrier |
 | `/edit [number or tracking]` | Change a package title (shows package list if no arg) |
 | `/status <number or tracking>` | Get detailed status + recent history |
 | `/remove <number or tracking>` | Remove a package |
@@ -81,10 +81,12 @@ Use numbers from `/list` (e.g. `/status 1`) or partial names — fuzzy matching 
 | `UPS_CHROME_PATH` | Optional path to an installed Chrome binary; UPS auto-detects common local Chrome paths |
 | `UPS_BROWSER_MODE` | `headless` by default, or `headful` for local UPS debugging |
 | `UPS_BROWSER_USER_DATA_DIR` | Optional Chrome profile directory for UPS checks; blank uses a temporary profile |
+| `UNIUNI_CHROME_PATH` | Optional path to Chrome for UniUni checks; blank uses Puppeteer's detected browser |
+| `UNIUNI_BROWSER_MODE` | `headless` by default, or `headful` for local UniUni debugging |
 
 ## How Tracking Works
 
-No external API keys needed. The app uses Puppeteer with a stealth plugin to render carrier tracking pages like a real browser, then extracts status, location, and timeline events from the page. A 3-second cooldown between requests avoids triggering bot detection. FedEx headless checks are server-safe, but FedEx/Akamai may block them; local debugging can use `FEDEX_BROWSER_MODE=headful`, or a server can run headful Chromium under a virtual display such as Xvfb. UPS checks prefer an installed Chrome binary because UPS can reject bundled automation Chromium. Each check opens Chrome once per carrier, processes all packages, then closes — keeping resource usage low.
+No external API keys needed. The app uses Puppeteer with a stealth plugin to render carrier tracking pages like a real browser, then extracts status, location, and timeline events from the page. A 3-second cooldown between requests avoids triggering bot detection. FedEx headless checks are server-safe, but FedEx/Akamai may block them; local debugging can use `FEDEX_BROWSER_MODE=headful`, or a server can run headful Chromium under a virtual display such as Xvfb. UPS checks prefer an installed Chrome binary because UPS can reject bundled automation Chromium. UniUni checks capture the structured tracking response requested by its official tracking page. Each check opens Chrome once per carrier, processes all packages, then closes — keeping resource usage low.
 
 ## Supported Carriers
 
@@ -93,6 +95,7 @@ No external API keys needed. The app uses Puppeteer with a stealth plugin to ren
 | USPS | 20–22 digits | tools.usps.com |
 | FedEx | 12+ digits or DT+12 digits | fedex.com |
 | UPS | 1Z + 16 letters/digits, T + 10 digits, 9 digits, 12 digits, 18 digits, or MI package IDs | ups.com |
+| UniUni | Commonly UUS + letters/digits; explicit selection accepts 8–40 letters/digits | uniuni.com |
 
 ## UPS Support
 
@@ -101,6 +104,12 @@ UPS tracking is now built into the app and works the same way as USPS and FedEx 
 - Auto-detects common UPS formats, including `1Z...`, `T` + 10 digits, 9 digits, 12 digits, 18 digits, and `MI` package IDs
 - Supports explicit carrier selection with `/add ups <tracking> [title]`
 - Opens the official UPS tracking page for clickable links and package details
+
+## UniUni Support
+
+- Auto-detects tracking numbers that begin with `UUS`
+- Supports explicit carrier selection with `/add uniuni <tracking> [title]`
+- Captures status, location, date, time, and tracking history from UniUni's official tracking page
 
 ## Tech Stack
 

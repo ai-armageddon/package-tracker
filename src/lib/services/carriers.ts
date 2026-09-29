@@ -1,4 +1,4 @@
-export const CARRIERS = ["USPS", "FedEx", "UPS"] as const;
+export const CARRIERS = ["USPS", "FedEx", "UPS", "UniUni"] as const;
 export type Carrier = (typeof CARRIERS)[number];
 
 export function normalizeTrackingNumber(tn: string): string {
@@ -78,10 +78,21 @@ export const CARRIER_CONFIG: Record<Carrier, CarrierConfig> = {
     favicon: "https://www.ups.com/favicon.ico",
     validate: isUpsTrackingNumber,
   },
+  UniUni: {
+    name: "UniUni",
+    trackingUrl: (tn) =>
+      `https://www.uniuni.com/tracking/?no=${encodeURIComponent(tn)}`,
+    homeUrl: "https://www.uniuni.com",
+    favicon: "https://www.uniuni.com/favicon.ico",
+    // UniUni does not publish one fixed tracking-number format. Keep explicit
+    // selection permissive while auto-detection below stays prefix-based.
+    validate: (tn) => /^[0-9A-Z]{8,40}$/.test(normalizeTrackingNumber(tn)),
+  },
 };
 
 export function detectCarrier(tn: string): Carrier | null {
   const cleaned = normalizeTrackingNumber(tn);
+  if (/^UUS[0-9A-Z]{8,37}$/.test(cleaned)) return "UniUni";
   if (isDistinctUpsTrackingNumber(cleaned)) return "UPS";
   if (CARRIER_CONFIG.USPS.validate(cleaned)) return "USPS";
   if (CARRIER_CONFIG.FedEx.validate(cleaned)) return "FedEx";
@@ -96,6 +107,9 @@ export function resolveCarrier(
   if (hint === "usps" || hint === "u") return "USPS";
   if (hint === "fedex" || hint === "f" || hint === "fx") return "FedEx";
   if (hint === "ups" || hint === "u.p.s.") return "UPS";
+  if (hint === "uniuni" || hint === "uni uni" || hint === "uni" || hint === "uus") {
+    return "UniUni";
+  }
   return detectCarrier(tn);
 }
 

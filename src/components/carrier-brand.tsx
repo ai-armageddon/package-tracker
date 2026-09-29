@@ -63,6 +63,17 @@ export const CARRIER_THEMES: Record<Carrier, CarrierTheme> = {
     statusTextClass: "text-amber-300",
     timelineDotClass: "carrier-timeline-dot-ups",
   },
+  UniUni: {
+    label: "UniUni",
+    formatHint: "UUS + letters/digits",
+    badgeClass: "carrier-badge-uniuni",
+    cardClass: "carrier-card-uniuni",
+    detectedClass: "carrier-detected-uniuni",
+    historyBorderClass: "carrier-history-border-uniuni",
+    historyCardClass: "carrier-history-card-uniuni",
+    statusTextClass: "text-orange-300",
+    timelineDotClass: "carrier-timeline-dot-uniuni",
+  },
 };
 
 function toCarrier(value: string | null | undefined): Carrier | null {
@@ -82,6 +93,36 @@ function LogoSvg({
   ...props
 }: SVGProps<SVGSVGElement> & { carrier: string | null | undefined }) {
   const knownCarrier = toCarrier(carrier);
+
+  if (knownCarrier === "UniUni") {
+    return (
+      <svg viewBox="0 0 86 48" role="img" aria-label="UniUni logo" {...props}>
+        <rect width="86" height="48" rx="9" fill="#ffffff" />
+        <path d="M9 13 20 7l11 6v14L20 33 9 27V13Z" fill="#242424" />
+        <path d="m15 16 5-3 5 3-5 3-5-3Zm0 2.5 4 2.3v6l-4-2.3v-6Zm10 0v6l-4 2.3v-6l4-2.3Z" fill="#ff7a16" />
+        <text
+          x="35"
+          y="29"
+          fill="#242424"
+          fontFamily="Arial, Helvetica, sans-serif"
+          fontSize="15"
+          fontWeight="700"
+        >
+          uni
+        </text>
+        <text
+          x="58"
+          y="29"
+          fill="#ff7a16"
+          fontFamily="Arial, Helvetica, sans-serif"
+          fontSize="15"
+          fontWeight="700"
+        >
+          uni
+        </text>
+      </svg>
+    );
+  }
 
   if (knownCarrier === "UPS") {
     return (
